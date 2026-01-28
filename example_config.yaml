@@ -1,0 +1,34 @@
+# Example configuration file for goProxy with string-based ips, hosts, and urls
+# Elements can be separated by commas or spaces
+
+default_proxy: "direct"
+
+proxies:
+  socks5: "socks5://localhost:1080"
+  http: "http://localhost:8081"
+  direct: ""
+  block: "#"
+
+listen_addr: ":8080"
+log_level: "info"
+ip_cache_size: 1000
+
+rules:
+  # Rule 1: Direct connection for local networks and internal domains
+  - proxy: "direct"
+    ips: "192.168.1.0/24 10.0.0.0/8 172.16.0.0/12"
+    hosts: "localhost*, *.local, *.example.com, internal.company.com"
+    urls: "http://internal-api.company.com/v1/* https://*.internal.com/api/*"
+
+  # Rule 2: Use SOCKS5 proxy for specific domains (inverted rule)
+  - proxy: "socks5"
+    not: true
+    hosts: "*.google.com, *.youtube.com, *.facebook.com"
+
+  # Rule 3: Use HTTP proxy for other external domains
+  - proxy: "http"
+    hosts: "*.external.com api.*.com"
+
+  # Rule 4: Block specific domains
+  - proxy: "block"
+    hosts: "*.malicious.com *.spam.com"

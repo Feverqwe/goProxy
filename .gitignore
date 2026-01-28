@@ -1,0 +1,17 @@
+# Go binaries
+goProxy
+*.exe
+*.test
+
+# IDE files
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+
+# Build artifacts
+/bin/
+/dist/
+/build/
+/GoProxy.app/
