@@ -3,6 +3,7 @@ module goProxy
 go 1.21
 
 require (
+	github.com/elazarl/goproxy v0.0.0-20231117061959-7cc037d33fb5
 	github.com/getlantern/systray v1.2.2
 	github.com/gobwas/glob v0.2.3
 	github.com/hashicorp/golang-lru v1.0.2

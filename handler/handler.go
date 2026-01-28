@@ -2,13 +2,13 @@ package handler
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/elazarl/goproxy"
 	"golang.org/x/net/proxy"
 
 	"goProxy/cache"
@@ -162,6 +162,27 @@ func (p *ProxyHandler) getProxyDialer(r *http.Request) (proxy.Dialer, string, er
 	return dialer, proxyKey, nil
 }
 
+// handleRequestWithGoproxy обрабатывает запрос через goproxy с указанным dialer
+func (p *ProxyHandler) handleRequestWithGoproxy(w http.ResponseWriter, r *http.Request, dialer proxy.Dialer, proxyKey string) {
+	// Создаем goproxy с нашим dialer
+	proxyServer := goproxy.NewProxyHttpServer()
+	proxyServer.Verbose = false
+
+	// Настраиваем dialer для goproxy
+	proxyServer.Tr = &http.Transport{
+		Dial:                  dialer.Dial,
+		MaxConnsPerHost:       100,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	// Обрабатываем запрос через goproxy
+	proxyServer.ServeHTTP(w, r)
+}
+
 func (p *ProxyHandler) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// Получаем dialer для запроса
 	dialer, proxyKey, err := p.getProxyDialer(r)
@@ -186,23 +207,6 @@ func (p *ProxyHandler) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var client *http.Client
-
-	// Создаем HTTP клиент с транспортом
-	transport := &http.Transport{
-		Dial:                  dialer.Dial,
-		MaxConnsPerHost:       100,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
-	client = &http.Client{
-		Transport: transport,
-		Timeout:   30 * time.Second,
-	}
-
 	// Логируем тип соединения
 	if dialer == proxy.Direct {
 		p.logger.Info("Direct request to %s (proxy '%s')", r.URL.Host, proxyKey)
@@ -210,46 +214,8 @@ func (p *ProxyHandler) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		p.logger.Info("Request to %s via proxy %s", r.URL.Host, proxyKey)
 	}
 
-	// Копируем запрос, но изменяем URL для абсолютного пути
-	outReq := r.Clone(r.Context())
-	outReq.URL.Scheme = "http"
-	if r.TLS != nil {
-		outReq.URL.Scheme = "https"
-	}
-	outReq.URL.Host = r.Host
-
-	// Удаляем заголовок Hop-by-hop
-	outReq.Header.Del("Proxy-Connection")
-	outReq.Header.Del("Proxy-Authenticate")
-	outReq.Header.Del("Proxy-Authorization")
-	outReq.Header.Del("TE")
-	outReq.Header.Del("Trailers")
-	outReq.Header.Del("Transfer-Encoding")
-	outReq.Header.Del("Upgrade")
-
-	// Отправляем запрос
-	resp, err := client.Do(outReq)
-	if err != nil {
-		http.Error(w, "Error forwarding request", http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-
-	// Копируем заголовки ответа
-	for key, values := range resp.Header {
-		for _, value := range values {
-			w.Header().Add(key, value)
-		}
-	}
-
-	// Устанавливаем статус код
-	w.WriteHeader(resp.StatusCode)
-
-	// Копируем тело ответа
-	_, err = io.Copy(w, resp.Body)
-	if err != nil {
-		p.logger.Error("Error copying response body: %v", err)
-	}
+	// Обрабатываем запрос через goproxy
+	p.handleRequestWithGoproxy(w, r, dialer, proxyKey)
 }
 
 func (p *ProxyHandler) handleHTTPS(w http.ResponseWriter, r *http.Request) {
@@ -283,39 +249,8 @@ func (p *ProxyHandler) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		p.logger.Info("HTTPS CONNECT to %s via proxy %s", r.Host, proxyKey)
 	}
 
-	// Устанавливаем соединение через dialer
-	targetConn, err := dialer.Dial("tcp", r.Host)
-	if err != nil {
-		p.logger.Error("Error connecting: %v", err)
-		http.Error(w, "Error connecting", http.StatusBadGateway)
-		return
-	}
-	defer targetConn.Close()
-
-	// Отправляем клиенту успешный ответ
-	w.WriteHeader(http.StatusOK)
-
-	// Получаем соединение с клиентом
-	hijacker, ok := w.(http.Hijacker)
-	if !ok {
-		p.logger.Error("Hijacking not supported")
-		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
-		return
-	}
-
-	clientConn, _, err := hijacker.Hijack()
-	if err != nil {
-		p.logger.Error("Error hijacking connection: %v", err)
-		http.Error(w, "Error hijacking connection", http.StatusInternalServerError)
-		return
-	}
-	defer clientConn.Close()
-
-	// Начинаем двунаправленную передачу данных
-	go func() {
-		io.Copy(targetConn, clientConn)
-	}()
-	io.Copy(clientConn, targetConn)
+	// Обрабатываем запрос через goproxy (он автоматически обработает CONNECT)
+	p.handleRequestWithGoproxy(w, r, dialer, proxyKey)
 }
 
 // ServeHTTP обрабатывает HTTP запросы

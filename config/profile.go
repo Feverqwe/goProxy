@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const APP_ID = "com.rndnm.goProxy"
+const APP_ID = "com.rndnm.goproxy"
 
 // getProfilePath returns the profile directory path
 func getProfilePath() string {
