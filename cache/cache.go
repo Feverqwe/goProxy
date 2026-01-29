@@ -4,42 +4,20 @@ import (
 	"net"
 
 	"github.com/gobwas/glob"
-	lru "github.com/hashicorp/golang-lru"
 )
 
 // CacheManager управляет различными типами кешей для оптимизации производительности
 type CacheManager struct {
-	parseIPCache *lru.Cache
-	globCache    map[string]glob.Glob
-	cidrCache    map[string]*net.IPNet
+	globCache map[string]glob.Glob
+	cidrCache map[string]*net.IPNet
 }
 
 // NewCacheManager создает новый менеджер кешей
-func NewCacheManager(parseIPCacheSize int) (*CacheManager, error) {
-	parseIPCache, err := lru.New(parseIPCacheSize)
-	if err != nil {
-		return nil, err
-	}
-
+func NewCacheManager() *CacheManager {
 	return &CacheManager{
-		parseIPCache: parseIPCache,
-		globCache:    make(map[string]glob.Glob),
-		cidrCache:    make(map[string]*net.IPNet),
-	}, nil
-}
-
-// ParseIPWithCache парсит IP с кешированием
-func (c *CacheManager) ParseIPWithCache(ipStr string) net.IP {
-	if cached, ok := c.parseIPCache.Get(ipStr); ok {
-		return cached.(net.IP)
+		globCache: make(map[string]glob.Glob),
+		cidrCache: make(map[string]*net.IPNet),
 	}
-
-	ip := net.ParseIP(ipStr)
-	if ip != nil {
-		c.parseIPCache.Add(ipStr, ip)
-	}
-
-	return ip
 }
 
 // GetGlob возвращает скомпилированный glob-паттерн с кешированием

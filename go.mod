@@ -6,7 +6,6 @@ require (
 	github.com/elazarl/goproxy v0.0.0-20231117061959-7cc037d33fb5
 	github.com/getlantern/systray v1.2.2
 	github.com/gobwas/glob v0.2.3
-	github.com/hashicorp/golang-lru v1.0.2
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
 	golang.org/x/net v0.17.0
 	gopkg.in/yaml.v3 v3.0.1

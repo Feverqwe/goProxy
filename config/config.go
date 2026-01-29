@@ -24,7 +24,6 @@ type ProxyConfig struct {
 	ListenAddr   string            `yaml:"listen_addr"`
 	LogLevel     string            `yaml:"log_level"`
 	Rules        []RuleConfig      `yaml:"rules"`
-	IPCacheSize  int               `yaml:"ip_cache_size"`
 }
 
 // ShouldLog проверяет, нужно ли логировать сообщение в зависимости от уровня
@@ -83,7 +82,6 @@ func LoadConfig(configPath string) (*ProxyConfig, error) {
 				Hosts: "*.malicious.com *.spam.com",
 			},
 		},
-		IPCacheSize: 1000,
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {

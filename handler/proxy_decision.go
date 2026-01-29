@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net"
 	"net/http"
 	"strings"
 
@@ -81,7 +82,7 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) string {
 
 		// Проверяем IP-диапазоны обхода в текущем правиле
 		if !matchesRule {
-			ip := d.cache.ParseIPWithCache(host)
+			ip := net.ParseIP(host)
 			if ip != nil {
 				for _, ipRule := range ipRules {
 					ipNet, err := d.cache.GetCIDRNet(ipRule)

@@ -34,11 +34,7 @@ func NewProxyHandler(configManager interface {
 	config := configManager.GetConfig()
 	logger := logging.NewLogger(config)
 
-	cacheManager, err := cache.NewCacheManager(config.IPCacheSize)
-	if err != nil {
-		// Use panic for fatal errors during initialization
-		panic(err)
-	}
+	cacheManager := cache.NewCacheManager()
 
 	// Предварительно компилируем паттерны
 	cacheManager.PrecompilePatterns(config.GetAllHosts(), config.GetAllURLs(), config.GetAllIps())
@@ -68,11 +64,7 @@ func (p *ProxyHandler) UpdateConfig(configManager interface {
 	p.logger = logging.NewLogger(config)
 
 	// Создаем новый кэш с новыми настройками
-	cacheManager, err := cache.NewCacheManager(config.IPCacheSize)
-	if err != nil {
-		p.logger.Error("Error creating new cache manager: %v", err)
-		return
-	}
+	cacheManager := cache.NewCacheManager()
 	p.cache = cacheManager
 
 	// Перекомпилируем паттерны с новой конфигурацией
