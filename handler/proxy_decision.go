@@ -7,19 +7,23 @@ import (
 
 	"goProxy/cache"
 	"goProxy/config"
+	"goProxy/logging"
 )
 
 // ProxyDecision обрабатывает логику принятия решения о маршрутизации запросов
 type ProxyDecision struct {
 	config *config.ProxyConfig
 	cache  *cache.CacheManager
+	logger *logging.Logger
 }
 
 // NewProxyDecision создает новый экземпляр для принятия решений о маршрутизации
 func NewProxyDecision(config *config.ProxyConfig, cache *cache.CacheManager) *ProxyDecision {
+	logger := logging.NewLogger(config)
 	return &ProxyDecision{
 		config: config,
 		cache:  cache,
+		logger: logger,
 	}
 }
 
@@ -81,7 +85,8 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) string {
 		}
 
 		// Проверяем IP-диапазоны обхода в текущем правиле
-		if !matchesRule {
+		if !matchesRule && len(ipRules) > 0 {
+			// Сначала проверяем, является ли хост IP-адресом
 			ip := net.ParseIP(host)
 			if ip != nil {
 				for _, ipRule := range ipRules {
@@ -89,6 +94,33 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) string {
 					if err == nil && ipNet.Contains(ip) {
 						matchesRule = true
 						break
+					}
+				}
+			} else {
+				// Если хост - это доменное имя, разрешаем его в IP-адреса
+				ips, err := d.cache.ResolveHost(host)
+				if err == nil {
+					if d.config.ShouldLog("debug") {
+						d.logger.Debug("Resolved host %s to IPs: %v", host, ips)
+					}
+					for _, resolvedIP := range ips {
+						for _, ipRule := range ipRules {
+							ipNet, err := d.cache.GetCIDRNet(ipRule)
+							if err == nil && ipNet.Contains(resolvedIP) {
+								if d.config.ShouldLog("debug") {
+									d.logger.Debug("Host %s IP %s matches IP rule %s", host, resolvedIP.String(), ipRule)
+								}
+								matchesRule = true
+								break
+							}
+						}
+						if matchesRule {
+							break
+						}
+					}
+				} else {
+					if d.config.ShouldLog("debug") {
+						d.logger.Debug("Failed to resolve host %s: %v", host, err)
 					}
 				}
 			}

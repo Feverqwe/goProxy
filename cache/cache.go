@@ -2,21 +2,34 @@ package cache
 
 import (
 	"net"
+	"time"
 
 	"github.com/gobwas/glob"
+	lru "github.com/hashicorp/golang-lru/v2/expirable"
 )
 
 // CacheManager управляет различными типами кешей для оптимизации производительности
 type CacheManager struct {
 	globCache map[string]glob.Glob
 	cidrCache map[string]*net.IPNet
+	dnsCache  *lru.LRU[string, []net.IP]
+}
+
+// dnsCacheEntry представляет запись в DNS кеше
+type dnsCacheEntry struct {
+	ips       []net.IP
+	timestamp time.Time
 }
 
 // NewCacheManager создает новый менеджер кешей
 func NewCacheManager() *CacheManager {
+	// Создаем LRU кеш для DNS с TTL 5 минут и максимальным размером 1000 записей
+	dnsCache := lru.NewLRU[string, []net.IP](1000, nil, 5*time.Minute)
+
 	return &CacheManager{
 		globCache: make(map[string]glob.Glob),
 		cidrCache: make(map[string]*net.IPNet),
+		dnsCache:  dnsCache,
 	}
 }
 
@@ -48,6 +61,25 @@ func (c *CacheManager) GetCIDRNet(cidr string) (*net.IPNet, error) {
 
 	c.cidrCache[cidr] = ipNet
 	return ipNet, nil
+}
+
+// ResolveHost разрешает доменное имя в IP адреса с кешированием
+func (c *CacheManager) ResolveHost(hostname string) ([]net.IP, error) {
+	// Проверяем кеш (LRU автоматически управляет TTL)
+	if ips, exists := c.dnsCache.Get(hostname); exists {
+		return ips, nil
+	}
+
+	// Разрешаем доменное имя
+	ips, err := net.LookupIP(hostname)
+	if err != nil {
+		return nil, err
+	}
+
+	// Сохраняем в кеш (LRU автоматически управляет TTL и размером)
+	c.dnsCache.Add(hostname, ips)
+
+	return ips, nil
 }
 
 // PrecompilePatterns предварительно компилирует паттерны для быстрого доступа
