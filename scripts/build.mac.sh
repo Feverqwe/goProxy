@@ -12,6 +12,9 @@ if [ ! -f $appify ]; then
  go build -o $appify github.com/Strosel/appify
 fi
 
-rm -r "./${NAME}.app" | true
+if [ -e "./${NAME}.app" ]; then
+    rm -r "./${NAME}.app" | true
+fi
+
 $appify -menubar -name "${NAME}" -author "${AUTHOR}" -id "${APP_ID}" -icon "${ICON_PATH}" "${BINARY}"
 rm "./${NAME}.app/Contents/README"

@@ -17,51 +17,6 @@ import (
 	"github.com/skratchdot/open-golang/open"
 )
 
-// ConfigManager manages configuration with reload capability
-type ConfigManager struct {
-	config     *config.ProxyConfig
-	configPath string
-	mu         sync.RWMutex
-}
-
-// NewConfigManager creates a new configuration manager
-func NewConfigManager(configPath string) (*ConfigManager, error) {
-	config, err := config.LoadConfig(configPath)
-	if err != nil {
-		return nil, err
-	}
-	return &ConfigManager{
-		config:     config,
-		configPath: configPath,
-	}, nil
-}
-
-// GetConfig returns a thread-safe copy of the configuration
-func (cm *ConfigManager) GetConfig() *config.ProxyConfig {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
-	return cm.config
-}
-
-// ReloadConfig reloads the configuration from file
-func (cm *ConfigManager) ReloadConfig() error {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-
-	newConfig, err := config.LoadConfig(cm.configPath)
-	if err != nil {
-		return err
-	}
-
-	cm.config = newConfig
-	return nil
-}
-
-// ShouldLog проверяет, нужно ли логировать сообщение в зависимости от уровня
-func (cm *ConfigManager) ShouldLog(level string) bool {
-	return cm.GetConfig().ShouldLog(level)
-}
-
 func main() {
 	// Парсим аргументы командной строки
 	defaultConfigPath := config.GetConfigPath()
@@ -69,7 +24,7 @@ func main() {
 	flag.Parse()
 
 	// Создаем менеджер конфигурации
-	configManager, err := NewConfigManager(*configPath)
+	configManager, err := config.NewConfigManager(*configPath)
 	if err != nil {
 		// Use standard log for fatal errors before logger is initialized
 		panic(err)
@@ -88,9 +43,14 @@ func main() {
 		Handler: proxyHandler,
 	}
 
+	// Переменные для управления сервером
+	serverMutex := &sync.Mutex{}
+	currentServer := server
+	currentListenAddr := currentConfig.ListenAddr
+
 	// Логируем информацию о запуске
 	logger.Info("Starting proxy server on %s", currentConfig.ListenAddr)
-	logger.Info("Default proxy: %s (%s)", currentConfig.GetProxyURL(), currentConfig.GetProxyType())
+	logger.Info("Default proxy: %s", currentConfig.GetProxyURL())
 	logger.Info("Available proxies: %v", currentConfig.Proxies)
 	logger.Info("Configuration reload signal: SIGHUP (kill -HUP %d)", os.Getpid())
 
@@ -100,6 +60,47 @@ func main() {
 
 	// Создаем трей менеджер
 	trayManager := tray.NewTrayManager()
+
+	// Функция для перезапуска сервера при изменении адреса
+	restartServerIfAddressChanged := func() {
+		serverMutex.Lock()
+		defer serverMutex.Unlock()
+
+		newConfig := configManager.GetConfig()
+		newListenAddr := newConfig.ListenAddr
+
+		// Проверяем, изменился ли адрес прослушивания
+		if newListenAddr != currentListenAddr {
+			logger.Info("Listen address changed from '%s' to '%s', restarting server...", currentListenAddr, newListenAddr)
+
+			// Останавливаем текущий сервер
+			if err := currentServer.Close(); err != nil {
+				logger.Error("Error closing old server: %v", err)
+			}
+
+			// Создаем новый сервер с новым адресом
+			newServer := &http.Server{
+				Addr:    newListenAddr,
+				Handler: proxyHandler,
+			}
+
+			// Запускаем новый сервер в горутине
+			go func() {
+				logger.Info("Starting new server on %s", newListenAddr)
+				if err := newServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					logger.Error("New server error: %v", err)
+					// Use panic for fatal errors during server startup
+					panic(err)
+				}
+			}()
+
+			// Обновляем текущие переменные
+			currentServer = newServer
+			currentListenAddr = newListenAddr
+		} else {
+			logger.Debug("Listen address unchanged (%s), no server restart needed", currentListenAddr)
+		}
+	}
 
 	// Запускаем горутину для обработки сигналов
 	go func() {
@@ -116,6 +117,9 @@ func main() {
 
 						// Обновляем конфигурацию в обработчике
 						proxyHandler.UpdateConfig(configManager)
+
+						// Проверяем и перезапускаем сервер при изменении адреса
+						restartServerIfAddressChanged()
 					}
 				case os.Interrupt, syscall.SIGTERM:
 					logger.Info("Received interrupt signal, shutting down...")
@@ -123,11 +127,13 @@ func main() {
 					return
 				}
 			case <-trayManager.GetQuitChan():
-				logger.Info("Received quit signal from tray, shutting down...")
-				server.Close()
+				serverMutex.Lock()
+				if err := currentServer.Close(); err != nil {
+					logger.Error("Error closing server: %v", err)
+				}
+				serverMutex.Unlock()
 				return
 			case <-trayManager.GetReloadChan():
-				logger.Info("Received reload config signal from tray, reloading configuration...")
 				if err := configManager.ReloadConfig(); err != nil {
 					logger.Error("Error reloading configuration: %v", err)
 				} else {
@@ -135,9 +141,11 @@ func main() {
 
 					// Обновляем конфигурацию в обработчике
 					proxyHandler.UpdateConfig(configManager)
+
+					// Проверяем и перезапускаем сервер при изменении адреса
+					restartServerIfAddressChanged()
 				}
 			case <-trayManager.GetOpenConfigChan():
-				logger.Info("Received open config directory signal from tray")
 				openConfigDirectory(*configPath, logger)
 			}
 		}
@@ -145,7 +153,7 @@ func main() {
 
 	// Запускаем сервер в горутине
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := currentServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("Server error: %v", err)
 			// Use panic for fatal errors during server startup
 			panic(err)
@@ -155,9 +163,13 @@ func main() {
 	// Запускаем трей менеджер (это блокирующий вызов)
 	trayManager.Start()
 
-	// Когда трей завершится, закрываем сервер
+	// Когда трей завершится, корректно закрываем сервер
 	logger.Info("Shutting down proxy server...")
-	server.Close()
+	serverMutex.Lock()
+	if err := currentServer.Close(); err != nil {
+		logger.Error("Error closing server: %v", err)
+	}
+	serverMutex.Unlock()
 	logger.Info("Proxy server stopped")
 }
 
@@ -175,8 +187,8 @@ func openConfigDirectory(configPath string, logger *logging.Logger) {
 		configDir = absPath
 	}
 
-	// Ensure the directory exists
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	// Ensure the directory exists with secure permissions
+	if err := os.MkdirAll(configDir, 0700); err != nil {
 		logger.Error("Error creating config directory: %v", err)
 		return
 	}

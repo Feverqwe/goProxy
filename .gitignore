@@ -2,6 +2,7 @@
 goProxy
 *.exe
 *.test
+*.log
 
 # IDE files
 .vscode/

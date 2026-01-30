@@ -60,26 +60,25 @@ HTTP прокси сервер на Go, который направляет за
 
 Файл конфигурации `config.yaml` содержит следующие параметры:
 
-- `default_proxy`: ключ прокси по умолчанию
+- `defaultProxy`: ключ прокси по умолчанию
 - `proxies`: словарь прокси-серверов (SOCKS5, HTTP, HTTPS, прямое соединение, блокировка)
-- `listen_addr`: адрес для прослушивания (по умолчанию: `:8080`)
-- `log_level`: уровень логирования (`debug`, `info`, `warn`, `error`, `none`)
+- `listenAddr`: адрес для прослушивания (по умолчанию: `:8080`)
+- `logLevel`: уровень логирования (`debug`, `info`, `warn`, `error`, `none`)
 - `rules`: список правил маршрутизации
-- `ip_cache_size`: размер кеша IP-адресов
 
 ### Конфигурация по умолчанию
 
 Если файл `config.yaml` не существует, используется следующая конфигурация по умолчанию:
 
 ```yaml
-default_proxy: direct
+defaultProxy: direct
 proxies:
   socks5: socks5://localhost:1080
   http: http://localhost:8081
   direct: ""
   block: "#"
-listen_addr: :8080
-log_level: info
+listenAddr: :8080
+logLevel: info
 rules:
   - proxy: direct
     ips: "192.168.1.0/24 10.0.0.0/8 172.16.0.0/12"
@@ -92,7 +91,6 @@ rules:
     hosts: "*.external.com api.*.com"
   - proxy: block
     hosts: "*.malicious.com *.spam.com"
-ip_cache_size: 1000
 ```
 
 Пример полной конфигурации доступен в файле [`example_config.yaml`](example_config.yaml:1).

@@ -1,7 +1,7 @@
 # Example configuration file for goProxy with string-based ips, hosts, and urls
 # Elements can be separated by commas or spaces
 
-default_proxy: "direct"
+defaultProxy: "direct"
 
 proxies:
   socks5: "socks5://localhost:1080"
@@ -9,9 +9,11 @@ proxies:
   direct: ""
   block: "#"
 
-listen_addr: ":8080"
-log_level: "info"
-ip_cache_size: 1000
+listenAddr: ":8080"
+logLevel: "info"
+logFile: "goProxy.log"
+maxLogSize: 10
+maxLogFiles: 5
 
 rules:
   # Rule 1: Direct connection for local networks and internal domains

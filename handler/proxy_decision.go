@@ -70,21 +70,33 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) string {
 	for _, rule := range d.config.Rules {
 		matchesRule := false
 
-		// Парсим строки в списки
-		urlRules := config.ParseStringToList(rule.URLs)
-		ipRules := config.ParseStringToList(rule.Ips)
-		hostRules := config.ParseStringToList(rule.Hosts)
+		// Используем предварительно распарсенные списки
+		urlRules := rule.GetParsedURLs()
+		ipRules := rule.GetParsedIps()
+		hostRules := rule.GetParsedHosts()
 
-		// Сначала проверяем полные URL паттерны в текущем правиле
-		for _, urlRule := range urlRules {
+		// Сначала проверяем полные URL паттерны в текущем правиле (самый быстрый способ)
+		if len(urlRules) > 0 {
 			fullURL := r.URL.String()
-			if d.matchesURLPattern(urlRule, fullURL) {
-				matchesRule = true
-				break
+			for _, urlRule := range urlRules {
+				if d.matchesURLPattern(urlRule, fullURL) {
+					matchesRule = true
+					break
+				}
 			}
 		}
 
-		// Проверяем IP-диапазоны обхода в текущем правиле
+		// Проверяем домены обхода в текущем правиле (быстрее чем DNS lookup)
+		if !matchesRule && len(hostRules) > 0 {
+			for _, hostRule := range hostRules {
+				if d.matchesGlob(hostRule, host) {
+					matchesRule = true
+					break
+				}
+			}
+		}
+
+		// Проверяем IP-диапазоны обхода в текущем правиле (самый медленный способ)
 		if !matchesRule && len(ipRules) > 0 {
 			// Сначала проверяем, является ли хост IP-адресом
 			ip := net.ParseIP(host)
@@ -97,17 +109,17 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) string {
 					}
 				}
 			} else {
-				// Если хост - это доменное имя, разрешаем его в IP-адреса
+				// Если хост - это доменное имя, разрешаем его в IP-адреса только если необходимо
 				ips, err := d.cache.ResolveHost(host)
 				if err == nil {
-					if d.config.ShouldLog("debug") {
+					if d.config.ShouldLog(config.LogLevelDebug) {
 						d.logger.Debug("Resolved host %s to IPs: %v", host, ips)
 					}
 					for _, resolvedIP := range ips {
 						for _, ipRule := range ipRules {
 							ipNet, err := d.cache.GetCIDRNet(ipRule)
 							if err == nil && ipNet.Contains(resolvedIP) {
-								if d.config.ShouldLog("debug") {
+								if d.config.ShouldLog(config.LogLevelDebug) {
 									d.logger.Debug("Host %s IP %s matches IP rule %s", host, resolvedIP.String(), ipRule)
 								}
 								matchesRule = true
@@ -119,19 +131,9 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) string {
 						}
 					}
 				} else {
-					if d.config.ShouldLog("debug") {
+					if d.config.ShouldLog(config.LogLevelDebug) {
 						d.logger.Debug("Failed to resolve host %s: %v", host, err)
 					}
-				}
-			}
-		}
-
-		// Проверяем домены обхода в текущем правиле
-		if !matchesRule {
-			for _, hostRule := range hostRules {
-				if d.matchesGlob(hostRule, host) {
-					matchesRule = true
-					break
 				}
 			}
 		}

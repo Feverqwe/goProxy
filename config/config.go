@@ -2,8 +2,8 @@ package config
 
 import (
 	"fmt"
-	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -16,40 +16,58 @@ type RuleConfig struct {
 	Hosts string `yaml:"hosts,omitempty"`
 	URLs  string `yaml:"urls,omitempty"`
 	Not   bool   `yaml:"not,omitempty"`
+
+	// Pre-parsed lists for performance optimization
+	parsedIps   []string
+	parsedHosts []string
+	parsedURLs  []string
 }
 
+// LogLevel constants
+const (
+	LogLevelDebug = 4
+	LogLevelInfo  = 3
+	LogLevelWarn  = 2
+	LogLevelError = 1
+	LogLevelNone  = 0
+)
+
 type ProxyConfig struct {
-	DefaultProxy string            `yaml:"default_proxy"` // Default proxy key to use
-	Proxies      map[string]string `yaml:"proxies"`       // Map of proxy keys to proxy URLs
-	ListenAddr   string            `yaml:"listen_addr"`
-	LogLevel     string            `yaml:"log_level"`
+	DefaultProxy string            `yaml:"defaultProxy"` // Default proxy key to use
+	Proxies      map[string]string `yaml:"proxies"`      // Map of proxy keys to proxy URLs
+	ListenAddr   string            `yaml:"listenAddr"`
+	LogLevel     string            `yaml:"logLevel"`
+	logLevelInt  int               // Pre-processed log level for fast comparisons
+	LogFile      string            `yaml:"logFile,omitempty"`     // Path to log file (optional)
+	MaxLogSize   int               `yaml:"maxLogSize,omitempty"`  // Max log file size in MB (optional)
+	MaxLogFiles  int               `yaml:"maxLogFiles,omitempty"` // Max number of log files to keep (optional)
 	Rules        []RuleConfig      `yaml:"rules"`
 }
 
-// ShouldLog проверяет, нужно ли логировать сообщение в зависимости от уровня
-func (c *ProxyConfig) ShouldLog(level string) bool {
-	levels := map[string]int{
-		"debug": 4,
-		"info":  3,
-		"warn":  2,
-		"error": 1,
-		"none":  0,
+// parseLogLevel converts log level string to integer constant
+func parseLogLevel(level string) int {
+	switch strings.ToLower(level) {
+	case "debug":
+		return LogLevelDebug
+	case "info":
+		return LogLevelInfo
+	case "warn":
+		return LogLevelWarn
+	case "error":
+		return LogLevelError
+	case "none":
+		return LogLevelNone
+	default:
+		return LogLevelInfo // Default to info
 	}
-
-	currentLevel, ok := levels[strings.ToLower(c.LogLevel)]
-	if !ok {
-		currentLevel = levels["info"] // По умолчанию info
-	}
-
-	messageLevel, ok := levels[strings.ToLower(level)]
-	if !ok {
-		messageLevel = levels["info"] // По умолчанию info
-	}
-
-	return messageLevel <= currentLevel
 }
 
-// LoadConfig загружает конфигурацию из файла
+// ShouldLog checks if a message should be logged based on the log level
+func (c *ProxyConfig) ShouldLog(level int) bool {
+	return level <= c.logLevelInt
+}
+
+// LoadConfig loads configuration from file
 func LoadConfig(configPath string) (*ProxyConfig, error) {
 	config := &ProxyConfig{
 		DefaultProxy: "direct",
@@ -59,8 +77,11 @@ func LoadConfig(configPath string) (*ProxyConfig, error) {
 			"direct": "",
 			"block":  "#",
 		},
-		ListenAddr: ":8080",
-		LogLevel:   "info",
+		ListenAddr:  ":8080",
+		LogLevel:    "info",
+		LogFile:     "goProxy.log", // Default log file
+		MaxLogSize:  10,            // 10 MB default max size
+		MaxLogFiles: 5,             // Keep 5 log files by default
 		Rules: []RuleConfig{
 			{
 				Proxy: "direct",
@@ -85,20 +106,13 @@ func LoadConfig(configPath string) (*ProxyConfig, error) {
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		// Check if old JSON config exists and migrate it
-		jsonConfigPath := strings.TrimSuffix(configPath, ".yaml") + ".json"
-		if _, err := os.Stat(jsonConfigPath); err == nil {
-			// Migrate from JSON to YAML by renaming
-			if err := os.Rename(jsonConfigPath, configPath); err != nil {
-				return nil, fmt.Errorf("error migrating config from JSON to YAML: %v", err)
-			}
-		} else {
-			// Create default config file
-			if err := saveDefaultConfig(configPath, config); err != nil {
-				return nil, fmt.Errorf("error creating default config file: %v", err)
-			}
-			return config, nil
+		// Create default config file
+		if err := saveDefaultConfig(configPath, config); err != nil {
+			return nil, fmt.Errorf("error creating default config file: %v", err)
 		}
+		// Pre-parse log level for default config
+		config.logLevelInt = parseLogLevel(config.LogLevel)
+		return config, nil
 	}
 
 	file, err := os.Open(configPath)
@@ -110,6 +124,12 @@ func LoadConfig(configPath string) (*ProxyConfig, error) {
 	if err := yaml.NewDecoder(file).Decode(config); err != nil {
 		return nil, fmt.Errorf("error parsing config file: %v", err)
 	}
+
+	// Pre-parse log level for fast comparisons
+	config.logLevelInt = parseLogLevel(config.LogLevel)
+
+	// Pre-parse all rule strings for performance optimization
+	config.preParseRuleLists()
 
 	return config, nil
 }
@@ -132,7 +152,8 @@ func saveDefaultConfig(configPath string, config *ProxyConfig) error {
 }
 
 // ParseStringToList parses a string with comma or space separated values into a slice
-func ParseStringToList(input string) []string {
+// If expandWildcardDomains is true, patterns starting with `*.` will be expanded to include the base domain
+func ParseStringToList(input string, expandWildcardDomains bool) []string {
 	if input == "" {
 		return []string{}
 	}
@@ -146,16 +167,32 @@ func ParseStringToList(input string) []string {
 	for _, part := range parts {
 		if part != "" {
 			result = append(result, part)
+
+			// Если указано расширение wildcard доменов и паттерн начинается с `*.`, добавляем также базовый домен
+			if expandWildcardDomains && strings.HasPrefix(part, "*.") {
+				baseDomain := strings.TrimPrefix(part, "*.")
+				result = append(result, baseDomain)
+			}
 		}
 	}
 	return result
+}
+
+// preParseRuleLists pre-parses all rule strings for performance optimization
+func (c *ProxyConfig) preParseRuleLists() {
+	for i := range c.Rules {
+		rule := &c.Rules[i]
+		rule.parsedIps = ParseStringToList(rule.Ips, false)
+		rule.parsedHosts = ParseStringToList(rule.Hosts, true)
+		rule.parsedURLs = ParseStringToList(rule.URLs, false)
+	}
 }
 
 // GetAllIps возвращает все IP-диапазоны обхода из всех правил
 func (c *ProxyConfig) GetAllIps() []string {
 	var allIPs []string
 	for _, rule := range c.Rules {
-		allIPs = append(allIPs, ParseStringToList(rule.Ips)...)
+		allIPs = append(allIPs, rule.parsedIps...)
 	}
 	return allIPs
 }
@@ -164,7 +201,7 @@ func (c *ProxyConfig) GetAllIps() []string {
 func (c *ProxyConfig) GetAllHosts() []string {
 	var allHosts []string
 	for _, rule := range c.Rules {
-		allHosts = append(allHosts, ParseStringToList(rule.Hosts)...)
+		allHosts = append(allHosts, rule.parsedHosts...)
 	}
 	return allHosts
 }
@@ -173,9 +210,24 @@ func (c *ProxyConfig) GetAllHosts() []string {
 func (c *ProxyConfig) GetAllURLs() []string {
 	var allURLs []string
 	for _, rule := range c.Rules {
-		allURLs = append(allURLs, ParseStringToList(rule.URLs)...)
+		allURLs = append(allURLs, rule.parsedURLs...)
 	}
 	return allURLs
+}
+
+// GetParsedIps returns pre-parsed IPs for a specific rule
+func (r *RuleConfig) GetParsedIps() []string {
+	return r.parsedIps
+}
+
+// GetParsedHosts returns pre-parsed hosts for a specific rule
+func (r *RuleConfig) GetParsedHosts() []string {
+	return r.parsedHosts
+}
+
+// GetParsedURLs returns pre-parsed URLs for a specific rule
+func (r *RuleConfig) GetParsedURLs() []string {
+	return r.parsedURLs
 }
 
 // GetProxyURL возвращает URL прокси на основе выбранного ключа
@@ -195,40 +247,34 @@ func (c *ProxyConfig) GetProxyURL() string {
 	return proxyURL
 }
 
-// GetProxyType определяет тип прокси на основе URL
-func (c *ProxyConfig) GetProxyType() string {
-	proxyURL := c.GetProxyURL()
-	if proxyURL == "" {
-		return "direct"
-	}
-
-	// Проверяем, содержит ли строка схему прокси
-	if strings.Contains(proxyURL, "://") {
-		parsed, err := url.Parse(proxyURL)
-		if err == nil {
-			return parsed.Scheme
-		}
-	}
-
-	// Если нет схемы, возвращаем пустую строку - тип должен быть указан явно
-	return ""
-}
-
-// GetProxyAddress возвращает адрес прокси без схемы
-func (c *ProxyConfig) GetProxyAddress() string {
-	proxyURL := c.GetProxyURL()
-	if proxyURL == "" {
+// GetAccessLogPath returns the log file path relative to the profile directory
+func (c *ProxyConfig) GetAccessLogPath() string {
+	if c.LogFile == "" {
 		return ""
 	}
 
-	// Если есть схема, извлекаем только хост:порт
-	if strings.Contains(proxyURL, "://") {
-		parsed, err := url.Parse(proxyURL)
-		if err == nil {
-			return parsed.Host
-		}
+	// If the path is already absolute, return it as is
+	if filepath.IsAbs(c.LogFile) {
+		return c.LogFile
 	}
 
-	// Если нет схемы, возвращаем как есть
-	return proxyURL
+	// Otherwise, make it relative to the profile directory
+	profileDir := getProfilePath()
+	return filepath.Join(profileDir, c.LogFile)
+}
+
+// GetMaxLogSize returns the maximum log file size in MB
+func (c *ProxyConfig) GetMaxLogSize() int {
+	if c.MaxLogSize <= 0 {
+		return 10 // Default to 10 MB
+	}
+	return c.MaxLogSize
+}
+
+// GetMaxLogFiles returns the maximum number of log files to keep
+func (c *ProxyConfig) GetMaxLogFiles() int {
+	if c.MaxLogFiles <= 0 {
+		return 5 // Default to 5 files
+	}
+	return c.MaxLogFiles
 }

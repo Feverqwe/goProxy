@@ -16,21 +16,17 @@ import (
 	"goProxy/logging"
 )
 
-// ProxyHandler обрабатывает HTTP и HTTPS запросы через прокси
+// ProxyHandler handles HTTP and HTTPS requests through proxy
 type ProxyHandler struct {
-	configManager interface {
-		GetConfig() *config.ProxyConfig
-	}
-	logger   *logging.Logger
-	cache    *cache.CacheManager
-	decision *ProxyDecision
-	mu       sync.RWMutex
+	configManager *config.ConfigManager
+	logger        *logging.Logger
+	cache         *cache.CacheManager
+	decision      *ProxyDecision
+	mu            sync.RWMutex
 }
 
 // NewProxyHandler создает новый обработчик прокси
-func NewProxyHandler(configManager interface {
-	GetConfig() *config.ProxyConfig
-}) *ProxyHandler {
+func NewProxyHandler(configManager *config.ConfigManager) *ProxyHandler {
 	config := configManager.GetConfig()
 	logger := logging.NewLogger(config)
 
@@ -51,9 +47,7 @@ func NewProxyHandler(configManager interface {
 }
 
 // UpdateConfig обновляет конфигурацию обработчика
-func (p *ProxyHandler) UpdateConfig(configManager interface {
-	GetConfig() *config.ProxyConfig
-}) {
+func (p *ProxyHandler) UpdateConfig(configManager *config.ConfigManager) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -61,13 +55,13 @@ func (p *ProxyHandler) UpdateConfig(configManager interface {
 	config := configManager.GetConfig()
 
 	// Обновляем логгер с новой конфигурацией
-	p.logger = logging.NewLogger(config)
+	if err := p.logger.Close(); err != nil {
+		p.logger.Error("Close logger error", err)
+	} else {
+		p.logger = logging.NewLogger(config)
+	}
 
-	// Создаем новый кэш с новыми настройками
-	cacheManager := cache.NewCacheManager()
-	p.cache = cacheManager
-
-	// Перекомпилируем паттерны с новой конфигурацией
+	// Перекомпилируем паттерны с новой конфигурацией (используем существующий кэш)
 	p.cache.PrecompilePatterns(config.GetAllHosts(), config.GetAllURLs(), config.GetAllIps())
 
 	// Обновляем компонент принятия решений
@@ -87,8 +81,7 @@ func (p *ProxyHandler) getProxyDialer(r *http.Request) (proxy.Dialer, string, er
 	// Получаем URL прокси по ключу
 	proxyURL, exists := config.Proxies[proxyKey]
 	if !exists {
-		p.logger.Error("Proxy key '%s' not found in proxies map", proxyKey)
-		return nil, proxyKey, nil
+		return nil, proxyKey, fmt.Errorf("proxy key '%s' not found in proxies map", proxyKey)
 	}
 
 	// Если URL прокси равен "#" - это специальный блокирующий прокси
@@ -102,53 +95,32 @@ func (p *ProxyHandler) getProxyDialer(r *http.Request) (proxy.Dialer, string, er
 	}
 
 	// Определяем тип прокси на основе URL
-	proxyType := ""
+	var dialer proxy.Dialer
+
 	if strings.Contains(proxyURL, "://") {
 		parsed, err := url.Parse(proxyURL)
-		if err == nil {
-			proxyType = parsed.Scheme
+		if err != nil {
+			return nil, proxyKey, fmt.Errorf("error parsing proxy URL: %w", err)
 		}
-	}
 
-	// Проверяем, что тип прокси указан
-	if proxyType == "" {
-		p.logger.Error("Proxy type is required for proxy '%s'. URL must include scheme (socks5://, http://, https://)", proxyKey)
-		return nil, proxyKey, fmt.Errorf("proxy type is required for proxy '%s'", proxyKey)
-	}
-
-	var dialer proxy.Dialer
-	var err error
-
-	switch proxyType {
-	case "socks5", "socks5h":
-		// Создаем SOCKS5 прокси
-		proxyAddr := proxyURL
-		if strings.Contains(proxyURL, "://") {
-			parsed, err := url.Parse(proxyURL)
-			if err == nil {
-				proxyAddr = parsed.Host
+		switch parsed.Scheme {
+		case "socks5", "socks5h":
+			// Создаем SOCKS5 прокси
+			dialer, err = proxy.SOCKS5("tcp", parsed.Host, nil, proxy.Direct)
+			if err != nil {
+				return nil, proxyKey, fmt.Errorf("error creating SOCKS5 proxy: %w", err)
 			}
+		case "http", "https":
+			// Создаем HTTP прокси
+			dialer, err = proxy.FromURL(parsed, proxy.Direct)
+			if err != nil {
+				return nil, proxyKey, fmt.Errorf("error creating HTTP proxy: %w", err)
+			}
+		default:
+			return nil, proxyKey, fmt.Errorf("unsupported proxy type: %s", parsed.Scheme)
 		}
-		dialer, err = proxy.SOCKS5("tcp", proxyAddr, nil, proxy.Direct)
-		if err != nil {
-			p.logger.Error("Error creating SOCKS5 proxy: %v", err)
-			return nil, proxyKey, err
-		}
-	case "http", "https":
-		// Создаем HTTP прокси
-		proxyURL, err := url.Parse(proxyURL)
-		if err != nil {
-			p.logger.Error("Error parsing HTTP proxy URL: %v", err)
-			return nil, proxyKey, err
-		}
-		dialer, err = proxy.FromURL(proxyURL, proxy.Direct)
-		if err != nil {
-			p.logger.Error("Error creating HTTP proxy: %v", err)
-			return nil, proxyKey, err
-		}
-	default:
-		p.logger.Error("Unsupported proxy type: %s", proxyType)
-		return nil, proxyKey, nil
+	} else {
+		return nil, proxyKey, fmt.Errorf("proxy URL must include scheme (socks5://, http://, https://) for proxy '%s'", proxyKey)
 	}
 
 	return dialer, proxyKey, nil
@@ -159,6 +131,10 @@ func (p *ProxyHandler) handleRequestWithGoproxy(w http.ResponseWriter, r *http.R
 	// Создаем goproxy с нашим dialer
 	proxyServer := goproxy.NewProxyHttpServer()
 	proxyServer.Verbose = false
+
+	// Настраиваем наш логгер для goproxy
+	goproxyLogger := logging.NewGoproxyLoggerAdapter(p.logger)
+	proxyServer.Logger = goproxyLogger
 
 	// Настраиваем dialer для goproxy
 	proxyServer.Tr = &http.Transport{
@@ -175,10 +151,11 @@ func (p *ProxyHandler) handleRequestWithGoproxy(w http.ResponseWriter, r *http.R
 	proxyServer.ServeHTTP(w, r)
 }
 
-func (p *ProxyHandler) handleHTTP(w http.ResponseWriter, r *http.Request) {
+func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isHTTPS bool) {
 	// Получаем dialer для запроса
 	dialer, proxyKey, err := p.getProxyDialer(r)
 	if err != nil {
+		p.logger.Error("Error getting proxy dialer: %v", err)
 		http.Error(w, "Proxy configuration error", http.StatusInternalServerError)
 		return
 	}
@@ -187,62 +164,58 @@ func (p *ProxyHandler) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	config := p.configManager.GetConfig()
 	proxyValue, exists := config.Proxies[proxyKey]
 	if exists && proxyValue == "#" {
-		p.logger.Info("Blocking request to %s (proxy '%s')", r.URL.Host, proxyKey)
+		target := r.URL.Host
+		if isHTTPS {
+			target = r.Host
+		}
+		p.logger.Info("Blocking %s request to %s (proxy '%s')", getRequestType(isHTTPS), target, proxyKey)
 		http.Error(w, "Request blocked by proxy configuration", http.StatusForbidden)
 		return
 	}
 
 	// Проверяем, что proxyKey существует (обработка случая, когда ключ не найден)
-	if dialer == nil {
+	if !exists {
 		p.logger.Error("Proxy key '%s' not found in proxies map", proxyKey)
 		http.Error(w, "Proxy configuration error", http.StatusInternalServerError)
 		return
 	}
 
+	// Проверяем, что dialer не nil (для не-блокирующих прокси)
+	if dialer == nil {
+		p.logger.Error("Invalid proxy configuration for key '%s'", proxyKey)
+		http.Error(w, "Proxy configuration error", http.StatusInternalServerError)
+		return
+	}
+
 	// Логируем тип соединения
+	target := r.URL.Host
+	if isHTTPS {
+		target = r.Host
+	}
 	if dialer == proxy.Direct {
-		p.logger.Info("Direct request to %s (proxy '%s')", r.URL.Host, proxyKey)
+		p.logger.Info("Direct %s to %s (proxy '%s')", getRequestType(isHTTPS), target, proxyKey)
 	} else {
-		p.logger.Info("Request to %s via proxy %s", r.URL.Host, proxyKey)
+		p.logger.Info("%s to %s via proxy %s", capitalize(getRequestType(isHTTPS)), target, proxyKey)
 	}
 
 	// Обрабатываем запрос через goproxy
 	p.handleRequestWithGoproxy(w, r, dialer, proxyKey)
 }
 
-func (p *ProxyHandler) handleHTTPS(w http.ResponseWriter, r *http.Request) {
-	// Получаем dialer для запроса
-	dialer, proxyKey, err := p.getProxyDialer(r)
-	if err != nil {
-		http.Error(w, "Proxy configuration error", http.StatusInternalServerError)
-		return
+// getRequestType возвращает строковое представление типа запроса
+func getRequestType(isHTTPS bool) string {
+	if isHTTPS {
+		return "HTTPS CONNECT"
 	}
+	return "request"
+}
 
-	// Проверяем, является ли прокси блокирующим (значение "#")
-	config := p.configManager.GetConfig()
-	proxyValue, exists := config.Proxies[proxyKey]
-	if exists && proxyValue == "#" {
-		p.logger.Info("Blocking HTTPS CONNECT to %s (proxy '%s')", r.Host, proxyKey)
-		http.Error(w, "Request blocked by proxy configuration", http.StatusForbidden)
-		return
+// capitalize возвращает строку с первой заглавной буквой
+func capitalize(s string) string {
+	if len(s) == 0 {
+		return s
 	}
-
-	// Проверяем, что proxyKey существует (обработка случая, когда ключ не найден)
-	if dialer == nil {
-		p.logger.Error("Proxy key '%s' not found in proxies map", proxyKey)
-		http.Error(w, "Proxy configuration error", http.StatusInternalServerError)
-		return
-	}
-
-	// Логируем тип соединения
-	if dialer == proxy.Direct {
-		p.logger.Info("Direct HTTPS CONNECT to %s (proxy '%s')", r.Host, proxyKey)
-	} else {
-		p.logger.Info("HTTPS CONNECT to %s via proxy %s", r.Host, proxyKey)
-	}
-
-	// Обрабатываем запрос через goproxy (он автоматически обработает CONNECT)
-	p.handleRequestWithGoproxy(w, r, dialer, proxyKey)
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // ServeHTTP обрабатывает HTTP запросы
@@ -252,10 +225,10 @@ func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Обрабатываем CONNECT метод для HTTPS
 	if r.Method == http.MethodConnect {
-		p.handleHTTPS(w, r)
+		p.handleRequest(w, r, true)
 		return
 	}
 
 	// Обрабатываем обычные HTTP запросы
-	p.handleHTTP(w, r)
+	p.handleRequest(w, r, false)
 }

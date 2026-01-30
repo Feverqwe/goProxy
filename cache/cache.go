@@ -15,12 +15,6 @@ type CacheManager struct {
 	dnsCache  *lru.LRU[string, []net.IP]
 }
 
-// dnsCacheEntry представляет запись в DNS кеше
-type dnsCacheEntry struct {
-	ips       []net.IP
-	timestamp time.Time
-}
-
 // NewCacheManager создает новый менеджер кешей
 func NewCacheManager() *CacheManager {
 	// Создаем LRU кеш для DNS с TTL 5 минут и максимальным размером 1000 записей
@@ -84,6 +78,10 @@ func (c *CacheManager) ResolveHost(hostname string) ([]net.IP, error) {
 
 // PrecompilePatterns предварительно компилирует паттерны для быстрого доступа
 func (c *CacheManager) PrecompilePatterns(hostPatterns, urlPatterns, ipPatterns []string) {
+	// Очищаем существующие кэши перед компиляцией новых паттернов
+	c.globCache = make(map[string]glob.Glob)
+	c.cidrCache = make(map[string]*net.IPNet)
+
 	// Компилируем host паттерны
 	for _, pattern := range hostPatterns {
 		if g, err := glob.Compile(pattern); err == nil {

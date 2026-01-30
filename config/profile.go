@@ -49,8 +49,8 @@ func getDefaultProfilePath() string {
 func GetConfigPath() string {
 	profileDir := getProfilePath()
 
-	// Create the profile directory if it doesn't exist
-	if err := os.MkdirAll(profileDir, 0755); err != nil {
+	// Create the profile directory if it doesn't exist with secure permissions
+	if err := os.MkdirAll(profileDir, 0700); err != nil {
 		panic(err)
 	}
 

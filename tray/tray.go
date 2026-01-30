@@ -29,11 +29,6 @@ func (tm *TrayManager) Start() {
 	systray.Run(tm.onReady, tm.onExit)
 }
 
-// WaitForQuit waits for the quit signal
-func (tm *TrayManager) WaitForQuit() {
-	<-tm.quitChan
-}
-
 // GetQuitChan returns the quit channel for external monitoring
 func (tm *TrayManager) GetQuitChan() <-chan struct{} {
 	return tm.quitChan

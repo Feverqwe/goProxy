@@ -37,11 +37,6 @@ func (tm *TrayManager) Start() {
 	// No-op for Linux
 }
 
-func (tm *TrayManager) WaitForQuit() {
-	// Wait for quit signal
-	<-tm.quitChan
-}
-
 func (tm *TrayManager) GetQuitChan() <-chan struct{} {
 	return tm.quitChan
 }
