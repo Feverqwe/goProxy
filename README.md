@@ -33,6 +33,20 @@ HTTP прокси сервер на Go, который направляет за
 5. Настройте конфигурацию в файле `config.yaml` (при необходимости)
 6. Запустите прокси сервер: `./goProxy`
 
+### Build windows
+
+````
+rename FILE_windows.syso FILE.syso
+
+go build -ldflags -H=windowsgui -trimpath -o goProxy.exe
+````
+
+For file icon, use rsrc
+
+````
+.\rsrc_windows_amd64.exe -ico .\icon.ico -o FILE_windows.syso
+````
+
 ### Дополнительные команды
 
 ```bash
