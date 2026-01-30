@@ -46,7 +46,7 @@ func (tm *TrayManager) GetOpenConfigChan() <-chan struct{} {
 
 // onReady is called when systray is ready
 func (tm *TrayManager) onReady() {
-	systray.SetTemplateIcon(assets.IconSVGData, assets.IconPngData)
+	systray.SetTemplateIcon(assets.IconSVGData, assets.IconIcoData)
 	systray.SetTooltip("GoProxy - HTTP Proxy Server")
 
 	tm.createMenu()

@@ -1,1 +1,5 @@
-env GO111MODULE=on go build -ldflags "-H=windowsgui"
+cd ..
+
+set GO111MODULE=on
+
+go build -ldflags "-H=windowsgui"
