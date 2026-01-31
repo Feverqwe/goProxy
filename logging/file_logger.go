@@ -4,6 +4,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"runtime"
 
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -41,9 +42,14 @@ func NewFileLogger(config ConfigProvider) (*FileLogger, error) {
 		Compress:   true,     // compress rotated files
 	}
 
-	// Create multi-writer that writes to both stdout and file
-	multiWriter := io.MultiWriter(os.Stdout, fl.lumberjack)
-	fl.fileLogger = log.New(multiWriter, "", log.LstdFlags)
+	var writer io.Writer
+	if runtime.GOOS == "windows" {
+		writer = fl.lumberjack
+	} else {
+		// Create multi-writer that writes to both stdout and file
+		writer = io.MultiWriter(os.Stdout, fl.lumberjack)
+	}
+	fl.fileLogger = log.New(writer, "", log.LstdFlags)
 
 	return fl, nil
 }
