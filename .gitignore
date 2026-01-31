@@ -2,7 +2,6 @@
 goProxy
 *.exe
 *.test
-*.log
 
 # IDE files
 .vscode/
@@ -16,3 +15,5 @@ goProxy
 /dist/
 /build/
 /GoProxy.app/
+*.log
+repomix-output.md

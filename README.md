@@ -36,8 +36,6 @@ HTTP прокси сервер на Go, который направляет за
 ### Build windows
 
 ````
-rename FILE_windows.syso FILE.syso
-
 go build -ldflags -H=windowsgui -trimpath -o goProxy.exe
 ````
 
