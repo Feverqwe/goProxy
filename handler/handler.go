@@ -127,7 +127,7 @@ func (p *ProxyHandler) getProxyDialer(r *http.Request) (proxy.Dialer, string, er
 }
 
 // handleRequestWithGoproxy обрабатывает запрос через goproxy с указанным dialer
-func (p *ProxyHandler) handleRequestWithGoproxy(w http.ResponseWriter, r *http.Request, dialer proxy.Dialer, proxyKey string) {
+func (p *ProxyHandler) handleRequestWithGoproxy(w http.ResponseWriter, r *http.Request, dialer proxy.Dialer) {
 	// Создаем goproxy с нашим dialer
 	proxyServer := goproxy.NewProxyHttpServer()
 	proxyServer.Verbose = false
@@ -199,7 +199,7 @@ func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isH
 	}
 
 	// Обрабатываем запрос через goproxy
-	p.handleRequestWithGoproxy(w, r, dialer, proxyKey)
+	p.handleRequestWithGoproxy(w, r, dialer)
 }
 
 // getRequestType возвращает строковое представление типа запроса
