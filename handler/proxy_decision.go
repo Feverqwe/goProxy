@@ -98,41 +98,63 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) string {
 
 		// Проверяем IP-диапазоны обхода в текущем правиле (самый медленный способ)
 		if !matchesRule && len(ipRules) > 0 {
-			// Сначала проверяем, является ли хост IP-адресом
-			ip := net.ParseIP(host)
-			if ip != nil {
-				for _, ipRule := range ipRules {
-					ipNet, err := d.cache.GetCIDRNet(ipRule)
-					if err == nil && ipNet.Contains(ip) {
-						matchesRule = true
-						break
-					}
-				}
+			targetIP := net.ParseIP(host)
+			var targetIPs []net.IP
+
+			if targetIP != nil {
+				targetIPs = []net.IP{targetIP}
 			} else {
-				// Если хост - это доменное имя, разрешаем его в IP-адреса только если необходимо
 				ips, err := d.cache.ResolveHost(host)
 				if err == nil {
+					targetIPs = ips
 					if d.config.ShouldLog(config.LogLevelDebug) {
-						d.logger.Debug("Resolved host %s to IPs: %v", host, ips)
+						d.logger.Debug("Resolved target host %s to %v", host, ips)
 					}
-					for _, resolvedIP := range ips {
-						for _, ipRule := range ipRules {
-							ipNet, err := d.cache.GetCIDRNet(ipRule)
-							if err == nil && ipNet.Contains(resolvedIP) {
+				}
+			}
+
+			if len(targetIPs) > 0 {
+				for _, ipRule := range ipRules {
+					// 1. Пробуем как прямой IP/CIDR
+					ipNet, err := d.cache.GetCIDRNet(ipRule)
+					if err == nil {
+						for _, tip := range targetIPs {
+							if ipNet.Contains(tip) {
 								if d.config.ShouldLog(config.LogLevelDebug) {
-									d.logger.Debug("Host %s IP %s matches IP rule %s", host, resolvedIP.String(), ipRule)
+									d.logger.Debug("Match: target %s (IP: %s) fits CIDR rule %s", host, tip, ipRule)
 								}
 								matchesRule = true
 								break
 							}
 						}
-						if matchesRule {
-							break
+					} else {
+						// 2. Если не IP, считаем что это домен в списке ips
+						if d.config.ShouldLog(config.LogLevelDebug) {
+							d.logger.Debug("Rule '%s' is not a CIDR, attempting DNS resolve", ipRule)
+						}
+
+						ruleIPs, err := d.cache.ResolveHost(ipRule)
+						if err == nil {
+							for _, rip := range ruleIPs {
+								for _, tip := range targetIPs {
+									if rip.Equal(tip) {
+										if d.config.ShouldLog(config.LogLevelDebug) {
+											d.logger.Debug("Match: target %s (IP: %s) matches IP %s from rule domain %s", host, tip, rip, ipRule)
+										}
+										matchesRule = true
+										break
+									}
+								}
+								if matchesRule {
+									break
+								}
+							}
+						} else if d.config.ShouldLog(config.LogLevelDebug) {
+							d.logger.Debug("Failed to resolve domain rule '%s': %v", ipRule, err)
 						}
 					}
-				} else {
-					if d.config.ShouldLog(config.LogLevelDebug) {
-						d.logger.Debug("Failed to resolve host %s: %v", host, err)
+					if matchesRule {
+						break
 					}
 				}
 			}

@@ -1,7 +1,9 @@
 package cache
 
 import (
+	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/gobwas/glob"
@@ -42,13 +44,29 @@ func (c *CacheManager) GetGlob(pattern string) (glob.Glob, error) {
 	return g, nil
 }
 
-// GetCIDRNet возвращает CIDR сеть с кешированием
+// GetCIDRNet возвращает CIDR сеть с кешированием, поддерживая одиночные IP
 func (c *CacheManager) GetCIDRNet(cidr string) (*net.IPNet, error) {
 	if ipNet, exists := c.cidrCache[cidr]; exists {
 		return ipNet, nil
 	}
 
-	_, ipNet, err := net.ParseCIDR(cidr)
+	normalizedCIDR := cidr
+	// Проверяем, содержит ли строка уже маску
+	if !strings.Contains(cidr, "/") {
+		ip := net.ParseIP(cidr)
+		if ip == nil {
+			return nil, fmt.Errorf("invalid IP address: %s", cidr)
+		}
+
+		// Определяем версию IP и добавляем соответствующую маску
+		if ip.To4() != nil {
+			normalizedCIDR = cidr + "/32"
+		} else {
+			normalizedCIDR = cidr + "/128"
+		}
+	}
+
+	_, ipNet, err := net.ParseCIDR(normalizedCIDR)
 	if err != nil {
 		return nil, err
 	}
