@@ -1,10 +1,7 @@
 {
   "$schema": "https://repomix.com/schemas/latest/schema.json",
   "input": {
-    "maxFileSize": 1048576, 
-    "excludePatterns": [
-      "**/.git/**"
-    ]
+    "maxFileSize": 1048576
   },
   "output": {
     "filePath": "repomix-output.md",
