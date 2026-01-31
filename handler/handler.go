@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -136,9 +138,9 @@ func (p *ProxyHandler) handleRequestWithGoproxy(w http.ResponseWriter, r *http.R
 	goproxyLogger := logging.NewGoproxyLoggerAdapter(p.logger)
 	proxyServer.Logger = goproxyLogger
 
-	// Настраиваем dialer для goproxy
+	// Настраиваем dialer для goproxy с использованием DialContext
 	proxyServer.Tr = &http.Transport{
-		Dial:                  dialer.Dial,
+		DialContext:           p.createDialContext(dialer),
 		MaxConnsPerHost:       100,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   10,
@@ -149,6 +151,40 @@ func (p *ProxyHandler) handleRequestWithGoproxy(w http.ResponseWriter, r *http.R
 
 	// Обрабатываем запрос через goproxy
 	proxyServer.ServeHTTP(w, r)
+}
+
+// createDialContext создает функцию DialContext на основе proxy.Dialer
+func (p *ProxyHandler) createDialContext(dialer proxy.Dialer) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		// Проверяем, поддерживает ли dialer DialContext
+		if contextDialer, ok := dialer.(proxy.ContextDialer); ok {
+			return contextDialer.DialContext(ctx, network, addr)
+		}
+
+		p.logger.Debug("Dialer does not support DialContext")
+
+		// Если dialer не поддерживает DialContext, используем обычный Dial
+		// и создаем канал для отмены операции
+		type dialResult struct {
+			conn net.Conn
+			err  error
+		}
+
+		resultChan := make(chan dialResult, 1)
+
+		go func() {
+			conn, err := dialer.Dial(network, addr)
+			resultChan <- dialResult{conn, err}
+		}()
+
+		select {
+		case <-ctx.Done():
+			// Контекст отменен, возвращаем ошибку
+			return nil, ctx.Err()
+		case result := <-resultChan:
+			return result.conn, result.err
+		}
+	}
 }
 
 func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isHTTPS bool) {
