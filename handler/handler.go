@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"bufio"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/http"
@@ -122,39 +124,57 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 	switch parsedURL.Scheme {
 	case "socks5", "socks5h":
 		// SOCKS5 прокси - используем стандартную реализацию
-		dialer, err := proxy.SOCKS5("tcp", parsedURL.Host, nil, proxy.Direct)
+		var auth *proxy.Auth
+		if parsedURL.User != nil {
+			auth = &proxy.Auth{
+				User: parsedURL.User.Username(),
+			}
+			if password, ok := parsedURL.User.Password(); ok {
+				auth.Password = password
+			}
+		}
+		dialer, err := proxy.SOCKS5("tcp", parsedURL.Host, auth, proxy.Direct)
 		if err != nil {
 			return nil, fmt.Errorf("error creating SOCKS5 dialer: %w", err)
 		}
 		return dialer.Dial(network, addr)
 	case "http", "https":
-		// HTTP/HTTPS прокси - реализуем HTTP CONNECT вручную
+		// HTTP/HTTPS прокси - реализуем HTTP CONNECT для туннелирования
 		conn, err := net.Dial("tcp", parsedURL.Host)
 		if err != nil {
 			return nil, fmt.Errorf("error connecting to HTTP proxy: %w", err)
 		}
 
-		// Для HTTPS CONNECT запросов отправляем CONNECT команду
-		if network == "tcp" && strings.Contains(addr, ":") {
-			connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", addr, addr)
-			if _, err := conn.Write([]byte(connectReq)); err != nil {
-				conn.Close()
-				return nil, fmt.Errorf("error sending CONNECT request: %w", err)
-			}
+		// Отправляем CONNECT команду для создания туннеля
+		connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", addr, addr)
 
-			// Читаем ответ прокси
-			buf := make([]byte, 4096)
-			n, err := conn.Read(buf)
-			if err != nil {
-				conn.Close()
-				return nil, fmt.Errorf("error reading proxy response: %w", err)
-			}
+		// Добавляем аутентификацию, если указана в URL прокси
+		if parsedURL.User != nil {
+			username := parsedURL.User.Username()
+			password, _ := parsedURL.User.Password()
+			credentials := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+			connectReq += fmt.Sprintf("Proxy-Authorization: Basic %s\r\n", credentials)
+		}
 
-			response := string(buf[:n])
-			if !strings.Contains(response, "200") {
-				conn.Close()
-				return nil, fmt.Errorf("proxy refused connection: %s", response)
-			}
+		connectReq += "\r\n"
+
+		if _, err := conn.Write([]byte(connectReq)); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("error sending CONNECT request: %w", err)
+		}
+
+		// Читаем ответ прокси с использованием bufio для корректного парсинга HTTP ответа
+		reader := bufio.NewReader(conn)
+		resp, err := http.ReadResponse(reader, nil)
+		if err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("error reading proxy response: %w", err)
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			conn.Close()
+			return nil, fmt.Errorf("proxy CONNECT failed with status: %d %s", resp.StatusCode, resp.Status)
 		}
 
 		return conn, nil
