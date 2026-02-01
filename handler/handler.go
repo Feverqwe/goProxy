@@ -62,7 +62,7 @@ func NewProxyHandler(configManager *config.ConfigManager) *ProxyHandler {
 		proxyServer:   proxyServer,
 	}
 
-	// Настраиваем Transport с DialContext функцией вместо Proxy
+	// Настраиваем Transport с DialContext функцией для всех типов прокси
 	proxyServer.Tr.DialContext = handler.dialContext
 
 	return handler
@@ -94,37 +94,7 @@ func (p *ProxyHandler) UpdateConfig(configManager *config.ConfigManager) {
 	p.proxyServer.Logger = goproxyLogger
 }
 
-// getProxyURL возвращает URL прокси для указанного запроса
-func (p *ProxyHandler) getProxyURL(r *http.Request) (*url.URL, error) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	// Получаем proxyURL из контекста запроса
-	proxyURL, ok := r.Context().Value(proxyURLContextKey).(string)
-	if !ok {
-		return nil, fmt.Errorf("proxy URL not found in request context")
-	}
-
-	// Если URL прокси равен "#" - это специальный блокирующий прокси
-	if proxyURL == "#" {
-		return nil, nil // Возвращаем nil для блокировки
-	}
-
-	// Если URL прокси пустой - используем прямое соединение (nil означает прямой доступ)
-	if proxyURL == "" {
-		return nil, nil
-	}
-
-	// Парсим URL прокси
-	parsedURL, err := url.Parse(proxyURL)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing proxy URL: %w", err)
-	}
-
-	return parsedURL, nil
-}
-
-// dialContext реализует DialContext для http.Transport, заменяя Proxy функцию
+// dialContext реализует DialContext для http.Transport, используя собственную реализацию без зацикливания
 func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	// Получаем proxyURL из контекста
 	proxyURL, ok := ctx.Value(proxyURLContextKey).(string)
@@ -151,16 +121,43 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 	// Создаем dialer в зависимости от типа прокси
 	switch parsedURL.Scheme {
 	case "socks5", "socks5h":
-		// SOCKS5 прокси
-		dialer, err := proxy.FromURL(parsedURL, proxy.Direct)
+		// SOCKS5 прокси - используем стандартную реализацию
+		dialer, err := proxy.SOCKS5("tcp", parsedURL.Host, nil, proxy.Direct)
 		if err != nil {
 			return nil, fmt.Errorf("error creating SOCKS5 dialer: %w", err)
 		}
 		return dialer.Dial(network, addr)
 	case "http", "https":
-		// HTTP/HTTPS прокси - используем прямое соединение
-		// goproxy будет обрабатывать HTTP CONNECT через свой механизм
-		return net.Dial(network, addr)
+		// HTTP/HTTPS прокси - реализуем HTTP CONNECT вручную
+		conn, err := net.Dial("tcp", parsedURL.Host)
+		if err != nil {
+			return nil, fmt.Errorf("error connecting to HTTP proxy: %w", err)
+		}
+
+		// Для HTTPS CONNECT запросов отправляем CONNECT команду
+		if network == "tcp" && strings.Contains(addr, ":") {
+			connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", addr, addr)
+			if _, err := conn.Write([]byte(connectReq)); err != nil {
+				conn.Close()
+				return nil, fmt.Errorf("error sending CONNECT request: %w", err)
+			}
+
+			// Читаем ответ прокси
+			buf := make([]byte, 4096)
+			n, err := conn.Read(buf)
+			if err != nil {
+				conn.Close()
+				return nil, fmt.Errorf("error reading proxy response: %w", err)
+			}
+
+			response := string(buf[:n])
+			if !strings.Contains(response, "200") {
+				conn.Close()
+				return nil, fmt.Errorf("proxy refused connection: %s", response)
+			}
+		}
+
+		return conn, nil
 	default:
 		return nil, fmt.Errorf("unsupported proxy scheme: %s", parsedURL.Scheme)
 	}
