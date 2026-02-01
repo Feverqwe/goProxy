@@ -8,6 +8,6 @@ BINARY="goProxy"
 ICON_PATH="./assets/icon.icns"
 
 # Version variables (can be overridden by environment)
-VERSION=1.0.4
+VERSION=1.0.5
 COMMIT=${COMMIT:-unknown}
 BUILD_TIME=${BUILD_TIME:-unknown}

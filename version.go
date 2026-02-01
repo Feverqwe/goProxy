@@ -6,7 +6,7 @@ import (
 )
 
 // Version information - will be set during build
-var Version = "1.0.4"
+var Version = "1.0.5"
 
 var (
 	Commit    = "unknown"
