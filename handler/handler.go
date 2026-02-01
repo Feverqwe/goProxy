@@ -3,13 +3,14 @@ package handler
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/elazarl/goproxy"
+	"golang.org/x/net/proxy"
 
 	"goProxy/cache"
 	"goProxy/config"
@@ -61,16 +62,8 @@ func NewProxyHandler(configManager *config.ConfigManager) *ProxyHandler {
 		proxyServer:   proxyServer,
 	}
 
-	// Настраиваем Transport с Proxy функцией
-	proxyServer.Tr = &http.Transport{
-		Proxy:                 handler.getProxyURL,
-		MaxConnsPerHost:       100,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
+	// Настраиваем Transport с DialContext функцией вместо Proxy
+	proxyServer.Tr.DialContext = handler.dialContext
 
 	return handler
 }
@@ -129,6 +122,48 @@ func (p *ProxyHandler) getProxyURL(r *http.Request) (*url.URL, error) {
 	}
 
 	return parsedURL, nil
+}
+
+// dialContext реализует DialContext для http.Transport, заменяя Proxy функцию
+func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	// Получаем proxyURL из контекста
+	proxyURL, ok := ctx.Value(proxyURLContextKey).(string)
+	if !ok {
+		return nil, fmt.Errorf("proxy URL not found in context")
+	}
+
+	// Если URL прокси равен "#" - блокируем соединение
+	if proxyURL == "#" {
+		return nil, fmt.Errorf("connection blocked by proxy configuration")
+	}
+
+	// Если URL прокси пустой - используем прямое соединение
+	if proxyURL == "" {
+		return net.Dial(network, addr)
+	}
+
+	// Парсим URL прокси
+	parsedURL, err := url.Parse(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing proxy URL: %w", err)
+	}
+
+	// Создаем dialer в зависимости от типа прокси
+	switch parsedURL.Scheme {
+	case "socks5", "socks5h":
+		// SOCKS5 прокси
+		dialer, err := proxy.FromURL(parsedURL, proxy.Direct)
+		if err != nil {
+			return nil, fmt.Errorf("error creating SOCKS5 dialer: %w", err)
+		}
+		return dialer.Dial(network, addr)
+	case "http", "https":
+		// HTTP/HTTPS прокси - используем прямое соединение
+		// goproxy будет обрабатывать HTTP CONNECT через свой механизм
+		return net.Dial(network, addr)
+	default:
+		return nil, fmt.Errorf("unsupported proxy scheme: %s", parsedURL.Scheme)
+	}
 }
 
 func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isHTTPS bool) {
