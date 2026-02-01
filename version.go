@@ -5,7 +5,6 @@ import (
 	"runtime/debug"
 )
 
-// Version information - will be set during build
 var Version = "1.0.6"
 
 var (
@@ -13,7 +12,6 @@ var (
 	BuildTime = "unknown"
 )
 
-// GetVersion returns the version information as a string
 func GetVersion() string {
 	version := fmt.Sprintf("GoProxy v%s", Version)
 
@@ -30,7 +28,6 @@ func GetVersion() string {
 	return version
 }
 
-// GetBuildInfo returns detailed build information
 func GetBuildInfo() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {

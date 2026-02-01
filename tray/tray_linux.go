@@ -8,7 +8,6 @@ import (
 	"syscall"
 )
 
-// TrayManager is a stub implementation for Linux systems
 type TrayManager struct {
 	quitChan       chan struct{}
 	reloadChan     chan struct{}
@@ -22,7 +21,6 @@ func NewTrayManager() *TrayManager {
 		openConfigChan: make(chan struct{}),
 	}
 
-	// Set up signal handling to close quitChan on interrupt
 	go func() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -34,7 +32,7 @@ func NewTrayManager() *TrayManager {
 }
 
 func (tm *TrayManager) Start() {
-	// No-op for Linux
+
 }
 
 func (tm *TrayManager) GetQuitChan() <-chan struct{} {
@@ -50,5 +48,5 @@ func (tm *TrayManager) GetOpenConfigChan() <-chan struct{} {
 }
 
 func (tm *TrayManager) Exit() {
-	// No-op for Linux
+
 }

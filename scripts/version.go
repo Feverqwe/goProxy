@@ -10,7 +10,6 @@ import (
 	"strings"
 )
 
-// Version represents a semantic version
 type Version struct {
 	Major      int
 	Minor      int
@@ -19,9 +18,8 @@ type Version struct {
 	Build      string
 }
 
-// ParseVersion parses a semantic version string
 func ParseVersion(version string) (*Version, error) {
-	// Regex for semantic version: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
+
 	re := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9\.]+))?(?:\+([a-zA-Z0-9\.]+))?$`)
 	matches := re.FindStringSubmatch(version)
 
@@ -44,7 +42,6 @@ func ParseVersion(version string) (*Version, error) {
 	return v, nil
 }
 
-// String returns the version as a string
 func (v *Version) String() string {
 	version := fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch)
 
@@ -58,7 +55,6 @@ func (v *Version) String() string {
 	return version
 }
 
-// Increment increments the version based on the type
 func (v *Version) Increment(incrementType string) error {
 	switch incrementType {
 	case "patch":
@@ -74,20 +70,17 @@ func (v *Version) Increment(incrementType string) error {
 		return fmt.Errorf("invalid increment type: %s (valid: patch, minor, major)", incrementType)
 	}
 
-	// Clear prerelease and build when incrementing
 	v.Prerelease = ""
 	v.Build = ""
 
 	return nil
 }
 
-// File paths
 const (
 	versionFile   = "version.go"
 	variablesFile = "scripts/_variables.sh"
 )
 
-// GetCurrentVersion reads the current version from version.go
 func GetCurrentVersion() (string, error) {
 	file, err := os.Open(versionFile)
 	if err != nil {
@@ -99,7 +92,7 @@ func GetCurrentVersion() (string, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.Contains(line, "var Version = ") {
-			// Extract version from line like: var Version = "1.2.3"
+
 			re := regexp.MustCompile(`var Version = "([^"]+)"`)
 			matches := re.FindStringSubmatch(line)
 			if matches != nil && len(matches) > 1 {
@@ -111,14 +104,12 @@ func GetCurrentVersion() (string, error) {
 	return "", fmt.Errorf("version not found in %s", versionFile)
 }
 
-// UpdateVersionFile updates the version in version.go
 func UpdateVersionFile(newVersion string) error {
 	content, err := os.ReadFile(versionFile)
 	if err != nil {
 		return fmt.Errorf("failed to read version file: %v", err)
 	}
 
-	// Replace version in the file
 	re := regexp.MustCompile(`var Version = "[^"]+"`)
 	newContent := re.ReplaceAllString(string(content), fmt.Sprintf(`var Version = "%s"`, newVersion))
 
@@ -131,16 +122,14 @@ func UpdateVersionFile(newVersion string) error {
 	return nil
 }
 
-// UpdateVariablesFile updates the version in _variables.sh
 func UpdateVariablesFile(newVersion string) error {
 	content, err := os.ReadFile(variablesFile)
 	if err != nil {
-		// It's okay if variables file doesn't exist
+
 		fmt.Printf("⚠ Variables file not found: %s\n", variablesFile)
 		return nil
 	}
 
-	// Replace version in the file
 	re := regexp.MustCompile(`VERSION=[^\n]*`)
 	newContent := re.ReplaceAllString(string(content), fmt.Sprintf("VERSION=%s", newVersion))
 
@@ -153,22 +142,18 @@ func UpdateVariablesFile(newVersion string) error {
 	return nil
 }
 
-// CreateGitTag creates a git tag for the current version
 func CreateGitTag(version string) error {
 	tagName := "v" + version
 
-	// Check if we're in a git repository
 	if _, err := os.Stat("./.git"); os.IsNotExist(err) {
 		return fmt.Errorf("not in a git repository")
 	}
 
-	// Check if tag already exists
 	cmd := fmt.Sprintf("git rev-parse %s > /dev/null 2>&1", tagName)
 	if system(cmd) == nil {
 		return fmt.Errorf("tag %s already exists", tagName)
 	}
 
-	// Create the tag
 	cmd = fmt.Sprintf("git tag -a %s -m \"Release %s\"", tagName, tagName)
 	if err := system(cmd); err != nil {
 		return fmt.Errorf("failed to create git tag: %v", err)
@@ -179,12 +164,10 @@ func CreateGitTag(version string) error {
 	return nil
 }
 
-// system runs a shell command and returns error if it fails
 func system(cmd string) error {
 	return exec.Command("sh", "-c", cmd).Run()
 }
 
-// ShowHelp displays usage information
 func ShowHelp() {
 	fmt.Println(`Version management script for GoProxy
 

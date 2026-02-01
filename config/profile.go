@@ -9,7 +9,6 @@ import (
 
 const APP_ID = "com.rndnm.goproxy"
 
-// getProfilePath returns the profile directory path
 func getProfilePath() string {
 	place := ""
 	for _, e := range os.Environ() {
@@ -24,7 +23,6 @@ func getProfilePath() string {
 	return place
 }
 
-// getDefaultProfilePath returns the default profile path based on the OS
 func getDefaultProfilePath() string {
 	place := ""
 	if runtime.GOOS == "windows" {
@@ -45,11 +43,9 @@ func getDefaultProfilePath() string {
 	return place
 }
 
-// GetConfigPath returns the full path to the configuration file
 func GetConfigPath() string {
 	profileDir := getProfilePath()
 
-	// Create the profile directory if it doesn't exist with secure permissions
 	if err := os.MkdirAll(profileDir, 0700); err != nil {
 		panic(err)
 	}
