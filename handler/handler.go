@@ -64,9 +64,10 @@ func NewProxyHandler(configManager *config.ConfigManager) *ProxyHandler {
 		proxyServer:   proxyServer,
 	}
 
-	// Настраиваем Transport с DialContext функцией для всех типов прокси
-	proxyServer.Tr.DialContext = handler.dialContext
-	proxyServer.Tr.TLSClientConfig = nil
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.DialContext = handler.dialContext
+
+	proxyServer.Tr = tr
 
 	return handler
 }
