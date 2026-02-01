@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,7 +22,15 @@ func main() {
 	// Парсим аргументы командной строки
 	defaultConfigPath := config.GetConfigPath()
 	configPath := flag.String("config", defaultConfigPath, "Path to configuration file")
+	versionFlag := flag.Bool("version", false, "Display version information")
 	flag.Parse()
+
+	// Если запрошена версия, показываем и выходим
+	if *versionFlag {
+		fmt.Println(GetVersion())
+		fmt.Println(GetBuildInfo())
+		return
+	}
 
 	// Создаем менеджер конфигурации
 	configManager, err := config.NewConfigManager(*configPath)

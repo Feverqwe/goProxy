@@ -1,0 +1,171 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  GO_VERSION: '1.24.0'
+
+jobs:
+  version-check:
+    name: Check Version and Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ ${{ github.ref }} == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            # Check if it's a pre-release (contains alpha, beta, rc, etc.)
+            if [[ $VERSION =~ alpha|beta|rc ]]; then
+              echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            else
+              echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "version=dev" >> $GITHUB_OUTPUT
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        if: github.ref == 'refs/tags/v*'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: ${{ steps.version.outputs.is_prerelease }}
+          generate_release_notes: true
+
+  build-windows:
+    name: Build Windows
+    needs: version-check
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build Windows executable
+        env:
+          VERSION: ${{ needs.version-check.outputs.version }}
+          COMMIT: ${{ github.sha }}
+          BUILD_TIME: ${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
+        run: |
+          cd scripts
+          .\build.win.bat
+          cd ..
+          dir *.exe
+
+      - name: Upload Windows release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: goProxy-windows-${{ needs.version-check.outputs.version }}
+          path: goProxy.exe
+          retention-days: 1
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        if: github.ref == 'refs/tags/v*'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: goProxy.exe
+
+  build-macos:
+    name: Build macOS
+    needs: version-check
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build macOS application
+        env:
+          VERSION: ${{ needs.version-check.outputs.version }}
+          COMMIT: ${{ github.sha }}
+          BUILD_TIME: ${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
+        run: |
+          chmod +x ./scripts/*.sh
+          sh ./scripts/build.mac.sh
+
+      - name: Create macOS archive
+        run: |
+          zip -r goProxy-macos-${{ needs.version-check.outputs.version }}.zip GoProxy.app
+
+      - name: Upload macOS release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: goProxy-macos-${{ needs.version-check.outputs.version }}
+          path: goProxy-macos-${{ needs.version-check.outputs.version }}.zip
+          retention-days: 1
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        if: github.ref == 'refs/tags/v*'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: goProxy-macos-${{ needs.version-check.outputs.version }}.zip
+
+  build-linux:
+    name: Build Linux
+    needs: version-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build Linux binary
+        env:
+          VERSION: ${{ needs.version-check.outputs.version }}
+          COMMIT: ${{ github.sha }}
+          BUILD_TIME: ${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
+        run: |
+          chmod +x ./scripts/*.sh
+          bash ./scripts/build.sh
+          chmod +x goProxy
+
+      - name: Upload Linux release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: goProxy-linux-${{ needs.version-check.outputs.version }}
+          path: goProxy
+          retention-days: 1
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        if: github.ref == 'refs/tags/v*'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: goProxy
