@@ -158,18 +158,18 @@ func CreateGitTag(version string) error {
 	tagName := "v" + version
 
 	// Check if we're in a git repository
-	if _, err := os.Stat("../.git"); os.IsNotExist(err) {
+	if _, err := os.Stat("./.git"); os.IsNotExist(err) {
 		return fmt.Errorf("not in a git repository")
 	}
 
 	// Check if tag already exists
-	cmd := fmt.Sprintf("cd .. && git rev-parse %s > /dev/null 2>&1", tagName)
+	cmd := fmt.Sprintf("git rev-parse %s > /dev/null 2>&1", tagName)
 	if system(cmd) == nil {
 		return fmt.Errorf("tag %s already exists", tagName)
 	}
 
 	// Create the tag
-	cmd = fmt.Sprintf("cd .. && git tag -a %s -m \"Release %s\"", tagName, tagName)
+	cmd = fmt.Sprintf("git tag -a %s -m \"Release %s\"", tagName, tagName)
 	if err := system(cmd); err != nil {
 		return fmt.Errorf("failed to create git tag: %v", err)
 	}
