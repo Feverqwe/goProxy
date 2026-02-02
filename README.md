@@ -1,212 +1,235 @@
-# Go HTTP Proxy Server
+# GoProxy - Advanced HTTP/HTTPS Proxy Server
 
-HTTP прокси сервер на Go, который направляет запросы через различные типы прокси (SOCKS5, HTTP, HTTPS) в зависимости от адреса назначения. Поддерживает конфигурируемые правила обхода, кеширование для производительности, интеграцию с системным треем.
+GoProxy is a sophisticated HTTP/HTTPS proxy server written in Go that provides intelligent routing, caching, and system tray integration. It supports multiple proxy types, rule-based routing, and hot-reloadable configuration.
 
-## Функциональность
+## Features
 
-- **Конфигурируемые правила обхода** с поддержкой glob-паттернов:
-  - IP-диапазоны (CIDR-нотация)
-  - Доменные имена с glob-паттернами
-  - Полные URL с путями и протоколами
+- **Multi-Protocol Support**: HTTP, HTTPS, SOCKS5 proxy support
+- **Rule-Based Routing**: Advanced pattern matching for IPs, hosts, and URLs
+- **Hot Reload**: Configuration reload without restart (SIGHUP or tray menu)
+- **System Tray Integration**: Native system tray support (Windows/macOS)
+- **Caching**: DNS and pattern caching for performance
+- **Logging**: Configurable logging with file rotation
+- **Cross-Platform**: Windows, macOS, and Linux support
+- **Blocking Support**: Ability to block specific domains/URLs
 
-- **Поддержка различных типов прокси**:
-  - SOCKS5 (`socks5://`, `socks5h://`)
-  - HTTP (`http://`)
-  - HTTPS (`https://`)
-  - Прямое соединение (без прокси)
-  - **Блокировка запросов** (значение `#`)
+## Installation
 
-- **Производительность**:
-  - Кеширование DNS запросов с TTL 5 минут
-  - Предварительная компиляция glob-паттернов
-  - LRU кеш для часто используемых паттернов
-  - Оптимизированная обработка HTTP/HTTPS запросов
+### Pre-built Binaries
 
-## Установка и запуск
+Download the latest release from the [Releases page](https://github.com/rndnm/goProxy/releases) for your platform:
 
-### Базовый запуск
+- **Windows**: `goProxy.exe` (console application with system tray)
+- **macOS**: `GoProxy.app` (native macOS application bundle)
+- **Linux**: `goProxy` (command-line binary)
 
-1. Убедитесь, что у вас установлен Go (версия 1.21 или выше)
-2. Клонируйте репозиторий и перейдите в директорию проекта
-3. Установите зависимости: `go mod tidy`
-4. Соберите проект: `go build -o goProxy`
-5. Настройте конфигурацию в файле `config.yaml` (при необходимости)
-6. Запустите прокси сервер: `./goProxy`
+### Building from Source
 
-### Build windows
+1. **Prerequisites**: Go 1.24.0 or later
+2. **Clone the repository**:
+   ```bash
+   git clone https://github.com/rndnm/goProxy.git
+   cd goProxy
+   ```
+3. **Build for your platform**:
 
-````
-go build -ldflags -H=windowsgui -trimpath -o goProxy.exe
-````
+   **Linux/Unix:**
+   ```bash
+   chmod +x ./scripts/*.sh
+   bash ./scripts/build.sh
+   ```
 
-For file icon, use rsrc
+   **macOS:**
+   ```bash
+   chmod +x ./scripts/*.sh
+   sh ./scripts/build.mac.sh
+   ```
 
-````
-.\rsrc_windows_amd64.exe -ico .\icon.ico -o FILE_windows.syso
-````
+   **Windows:**
+   ```cmd
+   cd scripts
+   build.win.bat
+   ```
 
-### Дополнительные команды
+## Configuration
 
-```bash
-# Сборка для macOS с приложением
-./scripts/build.mac.sh
+GoProxy uses a YAML configuration file that is automatically created on first run. The configuration file location depends on your platform:
 
-# Базовая сборка для других платформ
-./scripts/build.sh
+- **Windows**: Current working directory
+- **macOS**: `~/Library/Application Support/com.rndnm.goproxy/config.yaml`
+- **Linux**: Same directory as the executable
 
-# Запуск с автоматической сборкой
-./scripts/run.sh
-
-# Указать путь к конфигурационному файлу
-./goProxy -config /path/to/config.yaml
-
-# Показать версию приложения
-./goProxy -version
-```
-
-**Для macOS/Windows**: При запуске появится иконка в системном трее с меню управления:
-- **Reload config** - перезагрузить конфигурацию без перезапуска приложения
-- **Open config directory** - открыть директорию с конфигурационным файлом
-- **Quit** - корректное завершение работы приложения
-
-## Конфигурация
-
-### Формат конфигурации
-
-Файл конфигурации `config.yaml` содержит следующие параметры:
-
-- `defaultProxy`: ключ прокси по умолчанию
-- `proxies`: словарь прокси-серверов (SOCKS5, HTTP, HTTPS, прямое соединение, блокировка)
-- `listenAddr`: адрес для прослушивания (по умолчанию: `:8080`)
-- `logLevel`: уровень логирования (`debug`, `info`, `warn`, `error`, `none`)
-- `rules`: список правил маршрутизации
-
-### Конфигурация по умолчанию
-
-Если файл `config.yaml` не существует, используется следующая конфигурация по умолчанию:
+### Example Configuration
 
 ```yaml
-defaultProxy: direct
+# Example configuration file for goProxy with string-based ips, hosts, and urls
+# Elements can be separated by commas or spaces
+
+defaultProxy: "direct"
+
 proxies:
-  socks5: socks5://localhost:1080
-  http: http://localhost:8081
+  socks5: "socks5://localhost:1080"
+  http: "http://localhost:8081"
   direct: ""
   block: "#"
-listenAddr: :8080
-logLevel: info
+
+listenAddr: ":8080"
+logLevel: "info"
+logFile: "goProxy.log"
+maxLogSize: 10
+maxLogFiles: 5
+
 rules:
-  - proxy: direct
+  # Rule 1: Direct connection for local networks and internal domains
+  - proxy: "direct"
     ips: "192.168.1.0/24 10.0.0.0/8 172.16.0.0/12"
-    hosts: "localhost *.local *.example.com internal.company.com"
+    hosts: "localhost*, *.local, *.example.com, internal.company.com"
     urls: "http://internal-api.company.com/v1/* https://*.internal.com/api/*"
-  - proxy: socks5
+
+  # Rule 2: Use SOCKS5 proxy for specific domains (inverted rule)
+  - proxy: "socks5"
     not: true
-    hosts: "*.google.com *.youtube.com"
-  - proxy: http
+    hosts: "*.google.com, *.youtube.com, *.facebook.com"
+
+  # Rule 3: Use HTTP proxy for other external domains
+  - proxy: "http"
     hosts: "*.external.com api.*.com"
-  - proxy: block
+
+  # Rule 4: Block specific domains
+  - proxy: "block"
     hosts: "*.malicious.com *.spam.com"
 ```
 
-Пример полной конфигурации доступен в файле [`example_config.yaml`](example_config.yaml:1).
+### Configuration Options
 
-### Правила маршрутизации
+#### Global Settings
+- `defaultProxy`: Default proxy to use when no rules match
+- `proxies`: Map of proxy definitions
+- `listenAddr`: Address and port to listen on (e.g., ":8080")
+- `logLevel`: Logging level (debug, info, warn, error, none)
+- `logFile`: Log file path (relative to config directory)
+- `maxLogSize`: Maximum log file size in MB before rotation
+- `maxLogFiles`: Number of backup log files to keep
 
-Каждое правило содержит:
-- `proxy`: ключ прокси для использования
-- `ips`: строка с IP-диапазонами в CIDR нотации, разделенными пробелами или запятыми
-- `hosts`: строка с доменными именами с поддержкой glob-паттернов, разделенными пробелами или запятыми
-- `urls`: строка с полных URL с путями и протоколами, разделенными пробелами или запятыми
-- `not`: инвертировать правило (если `true`, правило применяется ко всем, кроме указанных)
+#### Proxy Definitions
+- `direct`: No proxy (direct connection)
+- `block`: Block the connection entirely
+- Custom proxies: HTTP/HTTPS/SOCKS5 URLs
 
-### Блокировка запросов
+#### Rule Configuration
+Rules are evaluated in order. Each rule can match based on:
+- `ips`: CIDR notation or IP addresses
+- `hosts`: Hostname patterns with wildcards (`*.example.com`)
+- `urls`: Full URL patterns with wildcards
+- `not`: Invert the rule logic (match everything EXCEPT the patterns)
 
-Для блокировки запросов используйте специальное значение `#` в конфигурации прокси:
+## Usage
 
-```yaml
-proxies:
-  block: "#"  # Блокирует все запросы, направленные через этот прокси
-```
-
-Когда запрос соответствует правилу с таким прокси:
-- Возвращается HTTP статус 403 Forbidden
-- Запрос логируется с пометкой "Blocking request"
-- Соединение немедленно прерывается
-
-**Пример использования для блокировки нежелательных доменов:**
-```yaml
-rules:
-  - proxy: block
-    hosts: "*.malicious.com *.spam.com *.ads.com"
-```
-
-**Приоритет проверки правил**: URL паттерны → IP-диапазоны → Домены
-
-## Использование
-
-Настройте приложение или браузер использовать HTTP прокси на `http://localhost:8080`.
-
-### Пример настройки
+### Command Line
 
 ```bash
-export HTTP_PROXY=http://localhost:8080
-export HTTPS_PROXY=http://localhost:8080
-curl -x http://localhost:8080 https://example.com
-```
+# Basic usage (uses default config location)
+./goProxy
 
-### Сигналы управления
+# Specify custom config file
+./goProxy -config /path/to/config.yaml
 
-- **SIGHUP** - перезагрузить конфигурацию
-- **SIGINT/SIGTERM** - грациозное завершение работы
-- **Системный трей** - управление через GUI (перезагрузка конфигурации, открытие директории конфига, выход)
-
-## Зависимости
-
-- **github.com/elazarl/goproxy** - HTTP прокси библиотека
-- **github.com/getlantern/systray** - интеграция с системным треем
-- **github.com/gobwas/glob** - поддержка glob-паттернов
-- **github.com/hashicorp/golang-lru/v2** - LRU кеширование
-- **github.com/skratchdot/open-golang** - открытие директорий и файлов
-- **golang.org/x/net** - сетевые утилиты
-
-## Автоматические релизы с GitHub Actions
-
-Проект использует GitHub Actions для автоматической сборки и создания релизов при добавлении тегов.
-
-### Процесс релиза
-
-1. **Создание тега**:
-   ```bash
-   git tag v1.0.0
-   git push origin v1.0.0
-   ```
-
-2. **Автоматическая сборка**: При пуше тега формата `v*` запускается workflow, который:
-   - Собирает бинарные файлы для Windows, macOS и Linux
-   - Создает релиз на GitHub с автоматическими заметками
-   - Загружает артефакты в релиз
-
-3. **Доступные артефакты**:
-   - `goProxy.exe` - Windows исполняемый файл
-   - `GoProxy.app` - macOS приложение (в архиве .zip)
-   - `goProxy` - Linux бинарный файл
-
-### Ручной запуск
-
-Workflow также можно запустить вручную через GitHub Actions интерфейс для тестирования сборки.
-
-### Версионирование
-
-Приложение поддерживает версионирование через флаг `-version`:
-```bash
+# Show version information
 ./goProxy -version
 ```
 
-Версия устанавливается через ldflags во время сборки и включает:
-- Номер версии
-- Хэш коммита
-- Время сборки
+### System Tray (Windows/macOS)
 
-## Лицензия
+When running on Windows or macOS, GoProxy provides a system tray icon with the following options:
+- **Reload config**: Reload configuration without restarting
+- **Open config directory**: Open the directory containing the config file
+- **Quit**: Gracefully shut down the proxy
 
-MIT License
+### Hot Reload
+
+Configuration can be reloaded without restarting the server:
+- **Windows/macOS**: Use the "Reload config" option in the system tray
+- **All platforms**: Send SIGHUP signal: `kill -HUP <pid>`
+
+## Rule Matching Logic
+
+GoProxy uses sophisticated pattern matching:
+
+### Host Matching
+- Supports wildcards: `*.example.com` matches `sub.example.com` but not `example.com`
+- Automatically expands wildcards: `*.example.com` also matches `example.com`
+- Handles ports: `example.com:8080` is properly parsed
+
+### IP Matching
+- CIDR notation: `192.168.1.0/24`
+- Individual IPs: `192.168.1.1`
+- Domain resolution: Hostnames are resolved to IPs for matching
+
+### URL Matching
+- Full URL patterns: `https://api.example.com/v1/*`
+- Supports wildcards in any part of the URL
+
+### Rule Evaluation
+1. Rules are processed in order from top to bottom
+2. First matching rule determines the proxy to use
+3. If no rules match, the `defaultProxy` is used
+4. Inverted rules (`not: true`) match everything EXCEPT the specified patterns
+
+## Logging
+
+GoProxy provides comprehensive logging with the following features:
+- Multiple log levels: DEBUG, INFO, WARN, ERROR
+- File logging with rotation
+- Console output (except Windows GUI)
+- Configurable log file size and retention
+
+### Log Format
+```
+[LEVEL] message with context
+```
+
+Example:
+```
+[INFO] Starting proxy server on :8080
+[INFO] HTTPS CONNECT to example.com via proxy socks5
+[DEBUG] Resolved target host example.com to [93.184.216.34]
+```
+
+## Architecture
+
+### Core Components
+
+- **Main Application** ([`main.go`](main.go)): Orchestrates the proxy server and system tray
+- **Configuration Management** ([`config/`](config/)): YAML config parsing and management
+- **Proxy Handler** ([`handler/`](handler/)): HTTP request handling and routing logic
+- **Caching System** ([`cache/`](cache/)): DNS and pattern caching for performance
+- **Logging System** ([`logging/`](logging/)): Configurable logging infrastructure
+- **System Tray** ([`tray/`](tray/)): Platform-specific system tray integration
+
+### Key Design Patterns
+
+- **Singleton Config Manager**: Thread-safe configuration access
+- **Strategy Pattern**: Different proxy implementations (direct, HTTP, SOCKS5, block)
+- **Observer Pattern**: Hot-reload configuration changes
+- **Factory Pattern**: Proxy handler creation based on configuration
+
+## Development
+
+### Dependencies
+
+- [`github.com/elazarl/goproxy`](https://github.com/elazarl/goproxy): Core proxy functionality
+- [`github.com/getlantern/systray`](https://github.com/getlantern/systray): System tray integration
+- [`github.com/gobwas/glob`](https://github.com/gobwas/glob): Pattern matching
+- [`gopkg.in/natefinch/lumberjack.v2`](https://github.com/natefinch/lumberjack): Log rotation
+- [`gopkg.in/yaml.v3`](https://github.com/go-yaml/yaml): YAML configuration parsing
+
+### Building and Testing
+
+```bash
+# Build for current platform
+go build -o goProxy
+```
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
