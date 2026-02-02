@@ -62,6 +62,7 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) string {
 	for _, rule := range d.config.Rules {
 		matchesRule := false
 
+		// Use the parsed rules which now include both regular and external rules
 		urlRules := rule.GetParsedURLs()
 		ipRules := rule.GetParsedIps()
 		hostRules := rule.GetParsedHosts()

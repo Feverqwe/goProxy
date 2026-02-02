@@ -95,9 +95,10 @@ rules:
   - proxy: "http"
     hosts: "*.external.com api.*.com"
 
-  # Rule 4: Block specific domains
+  # Rule 4: Block specific domains with external rule lists
   - proxy: "block"
-    hosts: "*.malicious.com *.spam.com"
+    externalHosts: "https://raw.githubusercontent.com/example/malicious-domains/main/blocklist.txt"
+    externalURLs: "./local-blocklist.txt"
 ```
 
 ### Configuration Options
@@ -121,7 +122,17 @@ Rules are evaluated in order. Each rule can match based on:
 - `ips`: CIDR notation or IP addresses
 - `hosts`: Hostname patterns with wildcards (`*.example.com`)
 - `urls`: Full URL patterns with wildcards
+- `externalIps`: External sources for IP rules (URLs or local file paths)
+- `externalHosts`: External sources for host rules (URLs or local file paths)
+- `externalURLs`: External sources for URL rules (URLs or local file paths)
 - `not`: Invert the rule logic (match everything EXCEPT the patterns)
+
+#### External Rule Sources
+GoProxy supports loading rules from external sources:
+- **URLs**: HTTP/HTTPS endpoints (automatically cached)
+- **Local files**: Relative to config directory or absolute paths
+- **Caching**: External rules are cached locally for performance
+- **Fallback**: Uses cached version if external source is unavailable
 
 ## Usage
 
@@ -171,9 +182,10 @@ GoProxy uses sophisticated pattern matching:
 
 ### Rule Evaluation
 1. Rules are processed in order from top to bottom
-2. First matching rule determines the proxy to use
-3. If no rules match, the `defaultProxy` is used
-4. Inverted rules (`not: true`) match everything EXCEPT the specified patterns
+2. External rules are loaded and merged with local rules
+3. First matching rule determines the proxy to use
+4. If no rules match, the `defaultProxy` is used
+5. Inverted rules (`not: true`) match everything EXCEPT the specified patterns
 
 ## Logging
 
@@ -200,9 +212,9 @@ Example:
 ### Core Components
 
 - **Main Application** ([`main.go`](main.go)): Orchestrates the proxy server and system tray
-- **Configuration Management** ([`config/`](config/)): YAML config parsing and management
+- **Configuration Management** ([`config/`](config/)): YAML config parsing and management with external rule loading
 - **Proxy Handler** ([`handler/`](handler/)): HTTP request handling and routing logic
-- **Caching System** ([`cache/`](cache/)): DNS and pattern caching for performance
+- **Caching System** ([`cache/`](cache/)): DNS, pattern, and external rule caching for performance
 - **Logging System** ([`logging/`](logging/)): Configurable logging infrastructure
 - **System Tray** ([`tray/`](tray/)): Platform-specific system tray integration
 
