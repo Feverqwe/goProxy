@@ -2,7 +2,7 @@
 
 set -e
 
-go run scripts/version.go inc patch
+go run scripts/version.go up
 
 source "$(dirname $0)/_variables.sh"
 

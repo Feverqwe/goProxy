@@ -177,6 +177,7 @@ Commands:
   get                    - Get current version
   set <version>          - Set version to specific value
   inc [patch|minor|major] - Increment version (default: patch)
+  up                     - Interactive version increment (choose patch/minor/major)
   tag                    - Create git tag for current version
   help                   - Show this help
 
@@ -186,9 +187,38 @@ Examples:
   go run scripts/version.go inc patch             # Increment patch version (1.2.3 -> 1.2.4)
   go run scripts/version.go inc minor             # Increment minor version (1.2.3 -> 1.3.0)
   go run scripts/version.go inc major             # Increment major version (1.2.3 -> 2.0.0)
+  go run scripts/version.go up                    # Interactive version increment
   go run scripts/version.go tag                   # Create git tag for current version
 
 Version format: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]`)
+}
+
+func promptVersionType() (string, error) {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println("Select version increment type:")
+	fmt.Println("1) patch - backward compatible bug fixes (e.g., 1.2.3 → 1.2.4)")
+	fmt.Println("2) minor - backward compatible new features (e.g., 1.2.3 → 1.3.0)")
+	fmt.Println("3) major - incompatible API changes (e.g., 1.2.3 → 2.0.0)")
+	fmt.Print("Enter choice (1-3): ")
+
+	choice, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed to read input: %v", err)
+	}
+
+	choice = strings.TrimSpace(choice)
+
+	switch choice {
+	case "1":
+		return "patch", nil
+	case "2":
+		return "minor", nil
+	case "3":
+		return "major", nil
+	default:
+		return "", fmt.Errorf("invalid choice: %s (must be 1, 2, or 3)", choice)
+	}
 }
 
 func main() {
@@ -246,6 +276,45 @@ func main() {
 		}
 
 		currentVersionStr, err := GetCurrentVersion()
+		if err != nil {
+			fmt.Printf("❌ Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		currentVersion, err := ParseVersion(currentVersionStr)
+		if err != nil {
+			fmt.Printf("❌ Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		if err := currentVersion.Increment(incrementType); err != nil {
+			fmt.Printf("❌ Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		newVersion := currentVersion.String()
+		fmt.Printf("Incrementing %s version: %s -> %s\n", incrementType, currentVersionStr, newVersion)
+
+		if err := UpdateVersionFile(newVersion); err != nil {
+			fmt.Printf("❌ Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		if err := UpdateVariablesFile(newVersion); err != nil {
+			fmt.Printf("❌ Error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "up":
+		currentVersionStr, err := GetCurrentVersion()
+		if err != nil {
+			fmt.Printf("❌ Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Current version: %s\n", currentVersionStr)
+
+		incrementType, err := promptVersionType()
 		if err != nil {
 			fmt.Printf("❌ Error: %v\n", err)
 			os.Exit(1)
