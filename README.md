@@ -81,22 +81,26 @@ maxLogFiles: 5
 
 rules:
   # Rule 1: Direct connection for local networks and internal domains
-  - proxy: "direct"
+  - name: "Local Networks"
+    proxy: "direct"
     ips: "192.168.1.0/24 10.0.0.0/8 172.16.0.0/12"
     hosts: "localhost*, *.local, *.example.com, internal.company.com"
     urls: "http://internal-api.company.com/v1/* https://*.internal.com/api/*"
 
   # Rule 2: Use SOCKS5 proxy for specific domains (inverted rule)
-  - proxy: "socks5"
+  - name: "Inverted Proxy Rule"
+    proxy: "socks5"
     not: true
     hosts: "*.google.com, *.youtube.com, *.facebook.com"
 
   # Rule 3: Use HTTP proxy for other external domains
-  - proxy: "http"
+  - name: "External Domains"
+    proxy: "http"
     hosts: "*.external.com api.*.com"
 
   # Rule 4: Block specific domains with external rule lists
-  - proxy: "block"
+  - name: "Blocked Domains"
+    proxy: "block"
     externalHosts: "https://raw.githubusercontent.com/example/malicious-domains/main/blocklist.txt"
     externalURLs: "./local-blocklist.txt"
 ```
@@ -119,6 +123,7 @@ rules:
 
 #### Rule Configuration
 Rules are evaluated in order. Each rule can match based on:
+- `name`: Optional descriptive name for the rule (used in logging)
 - `ips`: CIDR notation or IP addresses
 - `hosts`: Hostname patterns with wildcards (`*.example.com`)
 - `urls`: Full URL patterns with wildcards
@@ -203,7 +208,9 @@ GoProxy provides comprehensive logging with the following features:
 Example:
 ```
 [INFO] Starting proxy server on :8080
-[INFO] HTTPS CONNECT to example.com via proxy socks5
+[INFO] HTTPS CONNECT to example.com via proxy socks5 (rule: 'External Domains')
+[INFO] Blocking request to malicious.com (rule: 'Blocked Domains', proxy: 'block')
+[INFO] Direct request to internal.company.com (rule: 'Local Networks', proxy: 'direct')
 [DEBUG] Resolved target host example.com to [93.184.216.34]
 ```
 

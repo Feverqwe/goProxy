@@ -10,6 +10,11 @@ import (
 	"goProxy/logging"
 )
 
+type ProxyDecisionResult struct {
+	Proxy    string
+	RuleName string
+}
+
 type ProxyDecision struct {
 	config *config.ProxyConfig
 	cache  *cache.CacheManager
@@ -56,7 +61,7 @@ func (d *ProxyDecision) matchesURLPattern(pattern, url string) bool {
 	return g.Match(url)
 }
 
-func (d *ProxyDecision) GetProxyForRequest(r *http.Request) string {
+func (d *ProxyDecision) GetProxyForRequest(r *http.Request) ProxyDecisionResult {
 	host := r.URL.Hostname()
 
 	for _, rule := range d.config.Rules {
@@ -152,15 +157,32 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) string {
 		if rule.Not {
 
 			if !matchesRule {
-				return rule.Proxy
+				ruleName := rule.Name
+				if ruleName == "" {
+					ruleName = "unnamed rule"
+				}
+				return ProxyDecisionResult{
+					Proxy:    rule.Proxy,
+					RuleName: ruleName,
+				}
 			}
 		} else {
 
 			if matchesRule {
-				return rule.Proxy
+				ruleName := rule.Name
+				if ruleName == "" {
+					ruleName = "unnamed rule"
+				}
+				return ProxyDecisionResult{
+					Proxy:    rule.Proxy,
+					RuleName: ruleName,
+				}
 			}
 		}
 	}
 
-	return d.config.DefaultProxy
+	return ProxyDecisionResult{
+		Proxy:    d.config.DefaultProxy,
+		RuleName: "default",
+	}
 }

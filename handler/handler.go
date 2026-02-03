@@ -168,12 +168,12 @@ func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isH
 
 	p.mu.RLock()
 	config := p.configManager.GetConfig()
-	proxyKey := p.decision.GetProxyForRequest(r)
+	decisionResult := p.decision.GetProxyForRequest(r)
 	p.mu.RUnlock()
 
-	proxyURL, exists := config.Proxies[proxyKey]
+	proxyURL, exists := config.Proxies[decisionResult.Proxy]
 	if !exists {
-		p.logger.Error("Proxy key '%s' not found in proxies map", proxyKey)
+		p.logger.Error("Proxy key '%s' not found in proxies map", decisionResult.Proxy)
 		http.Error(w, "Proxy configuration error", http.StatusInternalServerError)
 		return
 	}
@@ -183,7 +183,7 @@ func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isH
 		if isHTTPS {
 			target = r.Host
 		}
-		p.logger.Info("Blocking %s request to %s (proxy '%s')", getRequestType(isHTTPS), target, proxyKey)
+		p.logger.Info("Blocking %s request to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
 		http.Error(w, "Request blocked by proxy configuration", http.StatusForbidden)
 		return
 	}
@@ -193,9 +193,9 @@ func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isH
 		target = r.Host
 	}
 	if proxyURL == "" {
-		p.logger.Info("Direct %s to %s (proxy '%s')", getRequestType(isHTTPS), target, proxyKey)
+		p.logger.Info("Direct %s to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
 	} else {
-		p.logger.Info("%s to %s via proxy %s", capitalize(getRequestType(isHTTPS)), target, proxyKey)
+		p.logger.Info("%s to %s via proxy %s (rule: '%s')", capitalize(getRequestType(isHTTPS)), target, decisionResult.Proxy, decisionResult.RuleName)
 	}
 
 	ctx := context.WithValue(r.Context(), proxyURLContextKey, proxyURL)

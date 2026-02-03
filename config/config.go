@@ -15,6 +15,7 @@ import (
 )
 
 type RuleConfig struct {
+	Name          string `yaml:"name,omitempty"`
 	Proxy         string `yaml:"proxy,omitempty"`
 	Ips           string `yaml:"ips,omitempty"`
 	Hosts         string `yaml:"hosts,omitempty"`
@@ -86,21 +87,25 @@ func LoadConfig(configPath string) (*ProxyConfig, error) {
 		MaxLogFiles: 5,
 		Rules: []RuleConfig{
 			{
+				Name:  "Local Networks",
 				Proxy: "direct",
 				Ips:   "192.168.1.0/24 10.0.0.0/8 172.16.0.0/12",
 				Hosts: "localhost *.local *.example.com internal.company.com",
 				URLs:  "http://internal-api.company.com/v1/* https://*.internal.com/api/*",
 			},
 			{
+				Name:  "Inverted Proxy Rule",
 				Proxy: "socks5",
 				Not:   true,
 				Hosts: "*.google.com *.youtube.com",
 			},
 			{
+				Name:  "External Domains",
 				Proxy: "http",
 				Hosts: "*.external.com api.*.com",
 			},
 			{
+				Name:  "Blocked Domains",
 				Proxy: "block",
 				Hosts: "*.malicious.com *.spam.com",
 			},
