@@ -107,10 +107,6 @@ func (c *ProxyConfig) GetMaxLogFiles() int {
 	return c.MaxLogFiles
 }
 
-func loadExternalRules(source string) (string, error) {
-	return loadExternalRulesRelativeTo(source, "")
-}
-
 func loadExternalRulesRelativeTo(source string, baseDir string) (string, error) {
 	var filePath string
 	var err error
