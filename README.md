@@ -103,6 +103,12 @@ rules:
     proxy: "block"
     externalHosts: "https://raw.githubusercontent.com/example/malicious-domains/main/blocklist.txt"
     externalURLs: "./local-blocklist.txt"
+
+  # Rule 5: Load complete rule configuration from external YAML file
+  - name: "External Rule Configuration"
+    proxy: "http"
+    externalRule: "./external-rules.yaml"
+    hosts: "additional-host.com"  # Will be merged with external rule hosts
 ```
 
 ### Configuration Options
@@ -130,14 +136,36 @@ Rules are evaluated in order. Each rule can match based on:
 - `externalIps`: External sources for IP rules (URLs or local file paths)
 - `externalHosts`: External sources for host rules (URLs or local file paths)
 - `externalURLs`: External sources for URL rules (URLs or local file paths)
+- `externalRule`: External YAML file containing rule configuration (without Proxy field)
 - `not`: Invert the rule logic (match everything EXCEPT the patterns)
 
 #### External Rule Sources
 GoProxy supports loading rules from external sources:
+
+**Individual Rule Lists:**
 - **URLs**: HTTP/HTTPS endpoints (automatically cached)
 - **Local files**: Relative to config directory or absolute paths
 - **Caching**: External rules are cached locally for performance
 - **Fallback**: Uses cached version if external source is unavailable
+
+**Complete Rule Configuration (ExternalRule):**
+- **YAML files**: Load complete rule configuration from external YAML files
+- **Field merging**: Fields from external rule are merged with main rule
+- **Relative paths**: Files are resolved relative to main config directory
+- **No Proxy field**: External rule files use `RuleBaseConfig` (without Proxy field)
+
+Example external rule file (`external-rules.yaml`):
+```yaml
+name: "External Rule Set"
+ips: "192.168.100.0/24 10.100.0.0/16"
+hosts: "*.external.com api.external.com"
+urls: "https://api.external.com/v1/*"
+externalIps: "http://example.com/ips.txt"
+externalHosts: "http://example.com/hosts.txt"
+not: false
+```
+
+Fields are merged by concatenating with newlines, allowing you to combine local and external rules.
 
 ## Usage
 
@@ -187,10 +215,22 @@ GoProxy uses sophisticated pattern matching:
 
 ### Rule Evaluation
 1. Rules are processed in order from top to bottom
-2. External rules are loaded and merged with local rules
+2. For each rule:
+   - External rule files (`externalRule`) are loaded first
+   - Fields from external rule are merged with main rule (Ips, Hosts, URLs, etc.)
+   - External rule lists (`externalIps`, `externalHosts`, `externalURLs`) are loaded and parsed
 3. First matching rule determines the proxy to use
 4. If no rules match, the `defaultProxy` is used
 5. Inverted rules (`not: true`) match everything EXCEPT the specified patterns
+
+### External Rule Merging
+When using `externalRule`, fields are merged as follows:
+- **Ips, Hosts, URLs**: Concatenated with newlines, then parsed together
+- **ExternalIps, ExternalHosts, ExternalURLs**: Also concatenated and loaded
+- **Name**: Uses main rule name if specified, otherwise external rule name
+- **Not**: Uses main rule setting if specified, otherwise external rule setting
+
+This allows you to create modular rule configurations and combine multiple rule sources.
 
 ## Logging
 

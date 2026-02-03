@@ -14,20 +14,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type RuleConfig struct {
+type RuleBaseConfig struct {
 	Name          string `yaml:"name,omitempty"`
-	Proxy         string `yaml:"proxy,omitempty"`
 	Ips           string `yaml:"ips,omitempty"`
 	Hosts         string `yaml:"hosts,omitempty"`
 	URLs          string `yaml:"urls,omitempty"`
 	ExternalIps   string `yaml:"externalIps,omitempty"`
 	ExternalHosts string `yaml:"externalHosts,omitempty"`
 	ExternalURLs  string `yaml:"externalURLs,omitempty"`
+	ExternalRule  string `yaml:"externalRule,omitempty"`
 	Not           bool   `yaml:"not,omitempty"`
 
 	parsedIps   []string
 	parsedHosts []string
 	parsedURLs  []string
+}
+
+type RuleConfig struct {
+	RuleBaseConfig `yaml:",inline"`
+	Proxy          string `yaml:"proxy,omitempty"`
 }
 
 const (
@@ -87,27 +92,35 @@ func LoadConfig(configPath string) (*ProxyConfig, error) {
 		MaxLogFiles: 5,
 		Rules: []RuleConfig{
 			{
-				Name:  "Local Networks",
+				RuleBaseConfig: RuleBaseConfig{
+					Name:  "Local Networks",
+					Ips:   "192.168.1.0/24 10.0.0.0/8 172.16.0.0/12",
+					Hosts: "localhost *.local *.example.com internal.company.com",
+					URLs:  "http://internal-api.company.com/v1/* https://*.internal.com/api/*",
+				},
 				Proxy: "direct",
-				Ips:   "192.168.1.0/24 10.0.0.0/8 172.16.0.0/12",
-				Hosts: "localhost *.local *.example.com internal.company.com",
-				URLs:  "http://internal-api.company.com/v1/* https://*.internal.com/api/*",
 			},
 			{
-				Name:  "Inverted Proxy Rule",
+				RuleBaseConfig: RuleBaseConfig{
+					Name:  "Inverted Proxy Rule",
+					Not:   true,
+					Hosts: "*.google.com *.youtube.com",
+				},
 				Proxy: "socks5",
-				Not:   true,
-				Hosts: "*.google.com *.youtube.com",
 			},
 			{
-				Name:  "External Domains",
+				RuleBaseConfig: RuleBaseConfig{
+					Name:  "External Domains",
+					Hosts: "*.external.com api.*.com",
+				},
 				Proxy: "http",
-				Hosts: "*.external.com api.*.com",
 			},
 			{
-				Name:  "Blocked Domains",
+				RuleBaseConfig: RuleBaseConfig{
+					Name:  "Blocked Domains",
+					Hosts: "*.malicious.com *.spam.com",
+				},
 				Proxy: "block",
-				Hosts: "*.malicious.com *.spam.com",
 			},
 		},
 	}
@@ -134,7 +147,8 @@ func LoadConfig(configPath string) (*ProxyConfig, error) {
 
 	config.logLevelInt = parseLogLevel(config.LogLevel)
 
-	config.preParseRuleLists()
+	configDir := filepath.Dir(configPath)
+	config.preParseRuleLists(configDir)
 
 	return config, nil
 }
@@ -160,22 +174,25 @@ func ParseStringToList(input string, expandWildcardDomains bool) []string {
 		return []string{}
 	}
 
-	// Split input into lines and remove comments from each line
 	lines := strings.Split(input, "\n")
 	var cleanedLines []string
 
 	for _, line := range lines {
-		// Remove everything after // or # comment markers
 		if idx := strings.Index(line, "//"); idx != -1 {
-			line = line[:idx]
+			beforeComment := strings.TrimSpace(line[:idx])
+			if beforeComment == "" {
+				line = line[:idx]
+			}
 		}
 		if idx := strings.Index(line, "#"); idx != -1 {
-			line = line[:idx]
+			beforeComment := strings.TrimSpace(line[:idx])
+			if beforeComment == "" {
+				line = line[:idx]
+			}
 		}
 		cleanedLines = append(cleanedLines, strings.TrimSpace(line))
 	}
 
-	// Join the cleaned lines and process as before
 	cleanedInput := strings.Join(cleanedLines, " ")
 	normalized := strings.ReplaceAll(cleanedInput, ",", " ")
 	parts := strings.Fields(normalized)
@@ -194,9 +211,18 @@ func ParseStringToList(input string, expandWildcardDomains bool) []string {
 	return result
 }
 
-func (c *ProxyConfig) preParseRuleLists() {
+func (c *ProxyConfig) preParseRuleLists(configDir string) {
 	for i := range c.Rules {
 		rule := &c.Rules[i]
+
+		if rule.ExternalRule != "" {
+			externalRule, err := c.loadExternalRuleFile(rule.ExternalRule, configDir)
+			if err != nil {
+				fmt.Printf("Warning: Failed to load external rule file from %s: %v\n", rule.ExternalRule, err)
+			} else {
+				c.mergeRuleFields(rule, externalRule)
+			}
+		}
 
 		rule.parsedIps = ParseStringToList(rule.Ips, false)
 		rule.parsedHosts = ParseStringToList(rule.Hosts, true)
@@ -226,7 +252,7 @@ func (c *ProxyConfig) preParseRuleLists() {
 				wg.Add(1)
 				go func(source string, expandWildcards bool, result *[]string) {
 					defer wg.Done()
-					rules := c.loadExternalRuleList(source, expandWildcards)
+					rules := c.loadExternalRuleList(source, expandWildcards, configDir)
 					mu.Lock()
 					*result = append(*result, rules...)
 					mu.Unlock()
@@ -238,12 +264,47 @@ func (c *ProxyConfig) preParseRuleLists() {
 	}
 }
 
-func (c *ProxyConfig) loadExternalRuleList(url string, expandWildcardDomains bool) []string {
+func (c *ProxyConfig) mergeRuleFields(mainRule *RuleConfig, externalRule *RuleBaseConfig) {
+	if mainRule.Name == "" && externalRule.Name != "" {
+		mainRule.Name = externalRule.Name
+	}
+	if !mainRule.Not && externalRule.Not {
+		mainRule.Not = externalRule.Not
+	}
+
+	mainRule.Ips = strings.TrimSpace(mainRule.Ips + "\n" + externalRule.Ips)
+	mainRule.Hosts = strings.TrimSpace(mainRule.Hosts + "\n" + externalRule.Hosts)
+	mainRule.URLs = strings.TrimSpace(mainRule.URLs + "\n" + externalRule.URLs)
+
+	mainRule.ExternalIps = strings.TrimSpace(mainRule.ExternalIps + "\n" + externalRule.ExternalIps)
+	mainRule.ExternalHosts = strings.TrimSpace(mainRule.ExternalHosts + "\n" + externalRule.ExternalHosts)
+	mainRule.ExternalURLs = strings.TrimSpace(mainRule.ExternalURLs + "\n" + externalRule.ExternalURLs)
+}
+
+func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string) (*RuleBaseConfig, error) {
+	if source == "" {
+		return &RuleBaseConfig{}, nil
+	}
+
+	content, err := loadExternalRulesRelativeTo(source, configDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load external rule file: %v", err)
+	}
+
+	var externalRule RuleBaseConfig
+	if err := yaml.Unmarshal([]byte(content), &externalRule); err != nil {
+		return nil, fmt.Errorf("failed to parse external rule file: %v", err)
+	}
+
+	return &externalRule, nil
+}
+
+func (c *ProxyConfig) loadExternalRuleList(url string, expandWildcardDomains bool, configDir string) []string {
 	if url == "" {
 		return []string{}
 	}
 
-	rulesContent, err := loadExternalRules(url)
+	rulesContent, err := loadExternalRulesRelativeTo(url, configDir)
 	if err != nil {
 		fmt.Printf("Warning: Failed to load external rules from %s: %v\n", url, err)
 		return []string{}
@@ -389,6 +450,10 @@ func downloadAndCacheFile(url string) (string, error) {
 }
 
 func loadExternalRules(source string) (string, error) {
+	return loadExternalRulesRelativeTo(source, "")
+}
+
+func loadExternalRulesRelativeTo(source string, baseDir string) (string, error) {
 	var filePath string
 	var err error
 
@@ -401,8 +466,12 @@ func loadExternalRules(source string) (string, error) {
 		filePath = source
 
 		if !filepath.IsAbs(filePath) {
-			profileDir := getProfilePath()
-			filePath = filepath.Join(profileDir, filePath)
+			if baseDir != "" {
+				filePath = filepath.Join(baseDir, filePath)
+			} else {
+				profileDir := getProfilePath()
+				filePath = filepath.Join(profileDir, filePath)
+			}
 		}
 
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -415,6 +484,5 @@ func loadExternalRules(source string) (string, error) {
 		return "", fmt.Errorf("failed to read file %s: %v", filePath, err)
 	}
 
-	// Return the raw content - ParseStringToList will handle comment filtering
 	return string(content), nil
 }

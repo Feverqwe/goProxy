@@ -86,7 +86,6 @@ func (p *ProxyHandler) UpdateConfig(configManager *config.ConfigManager) {
 }
 
 func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-
 	proxyURL, ok := ctx.Value(proxyURLContextKey).(string)
 	if !ok {
 		return nil, fmt.Errorf("proxy URL not found in context")
@@ -107,7 +106,6 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 
 	switch parsedURL.Scheme {
 	case "socks5", "socks5h":
-
 		var auth *proxy.Auth
 		if parsedURL.User != nil {
 			auth = &proxy.Auth{
@@ -123,7 +121,6 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 		}
 		return dialer.Dial(network, addr)
 	case "http", "https":
-
 		conn, err := net.Dial("tcp", parsedURL.Host)
 		if err != nil {
 			return nil, fmt.Errorf("error connecting to HTTP proxy: %w", err)
@@ -165,7 +162,6 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 }
 
 func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isHTTPS bool) {
-
 	p.mu.RLock()
 	config := p.configManager.GetConfig()
 	decisionResult := p.decision.GetProxyForRequest(r)
@@ -219,7 +215,6 @@ func capitalize(s string) string {
 }
 
 func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-
 	p.logger.Debug("%s %s %s", r.Method, r.URL.String(), r.RemoteAddr)
 
 	isHTTPS := r.Method == http.MethodConnect

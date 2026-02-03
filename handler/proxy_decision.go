@@ -31,7 +31,6 @@ func NewProxyDecision(config *config.ProxyConfig, cache *cache.CacheManager) *Pr
 }
 
 func (d *ProxyDecision) matchesGlob(pattern, s string) bool {
-
 	hostWithoutPort := s
 	if strings.Contains(s, ":") {
 		hostParts := strings.Split(s, ":")
@@ -67,7 +66,6 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) ProxyDecisionResult 
 	for _, rule := range d.config.Rules {
 		matchesRule := false
 
-		// Use the parsed rules which now include both regular and external rules
 		urlRules := rule.GetParsedURLs()
 		ipRules := rule.GetParsedIps()
 		hostRules := rule.GetParsedHosts()
@@ -109,7 +107,6 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) ProxyDecisionResult 
 
 			if len(targetIPs) > 0 {
 				for _, ipRule := range ipRules {
-
 					ipNet, err := d.cache.GetCIDRNet(ipRule)
 					if err == nil {
 						for _, tip := range targetIPs {
@@ -122,7 +119,6 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) ProxyDecisionResult 
 							}
 						}
 					} else {
-
 						if d.config.ShouldLog(config.LogLevelDebug) {
 							d.logger.Debug("Rule '%s' is not a CIDR, attempting DNS resolve", ipRule)
 						}
@@ -155,7 +151,6 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) ProxyDecisionResult 
 		}
 
 		if rule.Not {
-
 			if !matchesRule {
 				ruleName := rule.Name
 				if ruleName == "" {
@@ -167,7 +162,6 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) ProxyDecisionResult 
 				}
 			}
 		} else {
-
 			if matchesRule {
 				ruleName := rule.Name
 				if ruleName == "" {

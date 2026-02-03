@@ -19,7 +19,6 @@ import (
 )
 
 func main() {
-
 	defaultConfigPath := config.GetConfigPath()
 	configPath := flag.String("config", defaultConfigPath, "Path to configuration file")
 	versionFlag := flag.Bool("version", false, "Display version information")
@@ -33,7 +32,6 @@ func main() {
 
 	configManager, err := config.NewConfigManager(*configPath)
 	if err != nil {
-
 		panic(err)
 	}
 
@@ -84,7 +82,6 @@ func main() {
 				logger.Info("Starting new server on %s", newListenAddr)
 				if err := newServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 					logger.Error("New server error: %v", err)
-
 					panic(err)
 				}
 			}()
@@ -143,7 +140,6 @@ func main() {
 	go func() {
 		if err := currentServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("Server error: %v", err)
-
 			panic(err)
 		}
 	}()
