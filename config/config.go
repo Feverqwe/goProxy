@@ -160,7 +160,24 @@ func ParseStringToList(input string, expandWildcardDomains bool) []string {
 		return []string{}
 	}
 
-	normalized := strings.ReplaceAll(input, ",", " ")
+	// Split input into lines and remove comments from each line
+	lines := strings.Split(input, "\n")
+	var cleanedLines []string
+
+	for _, line := range lines {
+		// Remove everything after // or # comment markers
+		if idx := strings.Index(line, "//"); idx != -1 {
+			line = line[:idx]
+		}
+		if idx := strings.Index(line, "#"); idx != -1 {
+			line = line[:idx]
+		}
+		cleanedLines = append(cleanedLines, strings.TrimSpace(line))
+	}
+
+	// Join the cleaned lines and process as before
+	cleanedInput := strings.Join(cleanedLines, " ")
+	normalized := strings.ReplaceAll(cleanedInput, ",", " ")
 	parts := strings.Fields(normalized)
 
 	var result []string
@@ -398,14 +415,6 @@ func loadExternalRules(source string) (string, error) {
 		return "", fmt.Errorf("failed to read file %s: %v", filePath, err)
 	}
 
-	lines := strings.Split(string(content), "\n")
-	var rules []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" && !strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "//") {
-			rules = append(rules, line)
-		}
-	}
-
-	return strings.Join(rules, "\n"), nil
+	// Return the raw content - ParseStringToList will handle comment filtering
+	return string(content), nil
 }
