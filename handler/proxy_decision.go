@@ -4,29 +4,41 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"goProxy/cache"
 	"goProxy/config"
 	"goProxy/logging"
+
+	lru "github.com/hashicorp/golang-lru/v2/expirable"
 )
 
 type ProxyDecisionResult struct {
-	Proxy    string
-	RuleName string
+	Proxy     string
+	RuleName  string
+	MatchType string // "url", "host", "ip", or "default"
 }
 
 type ProxyDecision struct {
-	config *config.ProxyConfig
-	cache  *cache.CacheManager
-	logger *logging.Logger
+	config    *config.ProxyConfig
+	cache     *cache.CacheManager
+	logger    *logging.Logger
+	hostCache *lru.LRU[string, ProxyDecisionResult]
+	urlCache  *lru.LRU[string, ProxyDecisionResult]
 }
 
 func NewProxyDecision(config *config.ProxyConfig, cache *cache.CacheManager) *ProxyDecision {
 	logger := logging.NewLogger(config)
+
+	hostCache := lru.NewLRU[string, ProxyDecisionResult](1000, nil, 5*time.Minute)
+	urlCache := lru.NewLRU[string, ProxyDecisionResult](1000, nil, 5*time.Minute)
+
 	return &ProxyDecision{
-		config: config,
-		cache:  cache,
-		logger: logger,
+		config:    config,
+		cache:     cache,
+		logger:    logger,
+		hostCache: hostCache,
+		urlCache:  urlCache,
 	}
 }
 
@@ -62,19 +74,48 @@ func (d *ProxyDecision) matchesURLPattern(pattern, url string) bool {
 
 func (d *ProxyDecision) GetProxyForRequest(r *http.Request) ProxyDecisionResult {
 	host := r.URL.Hostname()
+	fullURL := r.URL.String()
 
+	if result, exists := d.urlCache.Get(fullURL); exists {
+		if d.config.ShouldLog(config.LogLevelDebug) {
+			d.logger.Debug("URL cache hit for %s: proxy=%s, rule=%s", fullURL, result.Proxy, result.RuleName)
+		}
+		return result
+	}
+
+	if result, exists := d.hostCache.Get(host); exists {
+		if d.config.ShouldLog(config.LogLevelDebug) {
+			d.logger.Debug("Host cache hit for %s: proxy=%s, rule=%s", host, result.Proxy, result.RuleName)
+		}
+		return result
+	}
+
+	result := d.evaluateRules(r, host, fullURL)
+
+	switch result.MatchType {
+	case "url":
+		d.urlCache.Add(fullURL, result)
+	default:
+		d.hostCache.Add(host, result)
+	}
+
+	return result
+}
+
+func (d *ProxyDecision) evaluateRules(r *http.Request, host, fullURL string) ProxyDecisionResult {
 	for _, rule := range d.config.Rules {
 		matchesRule := false
+		matchType := ""
 
 		urlRules := rule.GetParsedURLs()
 		ipRules := rule.GetParsedIps()
 		hostRules := rule.GetParsedHosts()
 
 		if len(urlRules) > 0 {
-			fullURL := r.URL.String()
 			for _, urlRule := range urlRules {
 				if d.matchesURLPattern(urlRule, fullURL) {
 					matchesRule = true
+					matchType = "url"
 					break
 				}
 			}
@@ -84,6 +125,7 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) ProxyDecisionResult 
 			for _, hostRule := range hostRules {
 				if d.matchesGlob(hostRule, host) {
 					matchesRule = true
+					matchType = "host"
 					break
 				}
 			}
@@ -115,6 +157,7 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) ProxyDecisionResult 
 									d.logger.Debug("Match: target %s (IP: %s) fits CIDR rule %s", host, tip, ipRule)
 								}
 								matchesRule = true
+								matchType = "ip"
 								break
 							}
 						}
@@ -132,6 +175,7 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) ProxyDecisionResult 
 											d.logger.Debug("Match: target %s (IP: %s) matches IP %s from rule domain %s", host, tip, rip, ipRule)
 										}
 										matchesRule = true
+										matchType = "ip"
 										break
 									}
 								}
@@ -161,14 +205,16 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) ProxyDecisionResult 
 
 		if matchesRule {
 			return ProxyDecisionResult{
-				Proxy:    rule.Proxy,
-				RuleName: ruleName,
+				Proxy:     rule.Proxy,
+				RuleName:  ruleName,
+				MatchType: matchType,
 			}
 		}
 	}
 
 	return ProxyDecisionResult{
-		Proxy:    d.config.DefaultProxy,
-		RuleName: "default",
+		Proxy:     d.config.DefaultProxy,
+		RuleName:  "default",
+		MatchType: "default",
 	}
 }
