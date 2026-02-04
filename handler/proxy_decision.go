@@ -150,27 +150,19 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) ProxyDecisionResult 
 			}
 		}
 
+		ruleName := rule.Name
+		if ruleName == "" {
+			ruleName = "unnamed rule"
+		}
+
 		if rule.Not {
-			if !matchesRule {
-				ruleName := rule.Name
-				if ruleName == "" {
-					ruleName = "unnamed rule"
-				}
-				return ProxyDecisionResult{
-					Proxy:    rule.Proxy,
-					RuleName: ruleName,
-				}
-			}
-		} else {
-			if matchesRule {
-				ruleName := rule.Name
-				if ruleName == "" {
-					ruleName = "unnamed rule"
-				}
-				return ProxyDecisionResult{
-					Proxy:    rule.Proxy,
-					RuleName: ruleName,
-				}
+			matchesRule = !matchesRule
+		}
+
+		if matchesRule {
+			return ProxyDecisionResult{
+				Proxy:    rule.Proxy,
+				RuleName: ruleName,
 			}
 		}
 	}
