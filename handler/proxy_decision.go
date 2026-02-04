@@ -4,13 +4,13 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"time"
 
 	"goProxy/cache"
 	"goProxy/config"
 	"goProxy/logging"
 
-	lru "github.com/hashicorp/golang-lru/v2/expirable"
+	lru "github.com/hashicorp/golang-lru/v2"
+	explru "github.com/hashicorp/golang-lru/v2/expirable"
 )
 
 type ProxyDecisionResult struct {
@@ -23,22 +23,25 @@ type ProxyDecision struct {
 	config    *config.ProxyConfig
 	cache     *cache.CacheManager
 	logger    *logging.Logger
-	hostCache *lru.LRU[string, ProxyDecisionResult]
-	urlCache  *lru.LRU[string, ProxyDecisionResult]
+	hostCache *lru.Cache[string, ProxyDecisionResult]
+	urlCache  *lru.Cache[string, ProxyDecisionResult]
+	ipCache   *explru.LRU[string, ProxyDecisionResult]
 }
 
-func NewProxyDecision(config *config.ProxyConfig, cache *cache.CacheManager) *ProxyDecision {
+func NewProxyDecision(config *config.ProxyConfig, cacheManager *cache.CacheManager) *ProxyDecision {
 	logger := logging.NewLogger(config)
 
-	hostCache := lru.NewLRU[string, ProxyDecisionResult](1000, nil, 5*time.Minute)
-	urlCache := lru.NewLRU[string, ProxyDecisionResult](1000, nil, 5*time.Minute)
+	hostCache, _ := lru.New[string, ProxyDecisionResult](1000)
+	urlCache, _ := lru.New[string, ProxyDecisionResult](1000)
+	ipCache := explru.NewLRU[string, ProxyDecisionResult](1000, nil, cache.IPResolutionTTL)
 
 	return &ProxyDecision{
 		config:    config,
-		cache:     cache,
+		cache:     cacheManager,
 		logger:    logger,
 		hostCache: hostCache,
 		urlCache:  urlCache,
+		ipCache:   ipCache,
 	}
 }
 
@@ -90,11 +93,20 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) ProxyDecisionResult 
 		return result
 	}
 
+	if result, exists := d.ipCache.Get(host); exists {
+		if d.config.ShouldLog(config.LogLevelDebug) {
+			d.logger.Debug("IP cache hit for %s: proxy=%s, rule=%s", host, result.Proxy, result.RuleName)
+		}
+		return result
+	}
+
 	result := d.evaluateRules(r, host, fullURL)
 
 	switch result.MatchType {
 	case "url":
 		d.urlCache.Add(fullURL, result)
+	case "ip":
+		d.ipCache.Add(host, result)
 	default:
 		d.hostCache.Add(host, result)
 	}

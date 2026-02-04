@@ -10,6 +10,10 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2/expirable"
 )
 
+const (
+	IPResolutionTTL = 5 * time.Minute
+)
+
 type CacheManager struct {
 	globCache map[string]glob.Glob
 	cidrCache map[string]*net.IPNet
@@ -17,8 +21,7 @@ type CacheManager struct {
 }
 
 func NewCacheManager() *CacheManager {
-
-	dnsCache := lru.NewLRU[string, []net.IP](1000, nil, 5*time.Minute)
+	dnsCache := lru.NewLRU[string, []net.IP](1000, nil, IPResolutionTTL)
 
 	return &CacheManager{
 		globCache: make(map[string]glob.Glob),
@@ -71,7 +74,6 @@ func (c *CacheManager) GetCIDRNet(cidr string) (*net.IPNet, error) {
 }
 
 func (c *CacheManager) ResolveHost(hostname string) ([]net.IP, error) {
-
 	if ips, exists := c.dnsCache.Get(hostname); exists {
 		return ips, nil
 	}
@@ -87,7 +89,6 @@ func (c *CacheManager) ResolveHost(hostname string) ([]net.IP, error) {
 }
 
 func (c *CacheManager) PrecompilePatterns(hostPatterns, urlPatterns, ipPatterns []string) {
-
 	c.globCache = make(map[string]glob.Glob)
 	c.cidrCache = make(map[string]*net.IPNet)
 
