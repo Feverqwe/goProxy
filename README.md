@@ -17,7 +17,7 @@ GoProxy is a sophisticated HTTP/HTTPS proxy server written in Go that provides i
 
 ### Pre-built Binaries
 
-Download the latest release from the [Releases page](https://github.com/rndnm/goProxy/releases) for your platform:
+Download the latest release from the [Releases page](https://github.com/Feverqwe/goProxy/releases) for your platform:
 
 - **Windows**: `goProxy.exe` (console application with system tray)
 - **macOS**: `GoProxy.app` (native macOS application bundle)
