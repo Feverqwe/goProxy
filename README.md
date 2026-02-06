@@ -84,25 +84,23 @@ rules:
   - name: "Local Networks"
     proxy: "direct"
     ips: "192.168.1.0/24 10.0.0.0/8 172.16.0.0/12"
-    hosts: "localhost*, *.local, *.example.com, internal.company.com"
+    hosts: "localhost *.local *.example.com internal.company.com"
     urls: "http://internal-api.company.com/v1/* https://*.internal.com/api/*"
 
-  # Rule 2: Use SOCKS5 proxy for specific domains (inverted rule)
-  - name: "Inverted Proxy Rule"
-    proxy: "socks5"
-    not: true
-    hosts: "*.google.com, *.youtube.com, *.facebook.com"
+  # Rule 2: Block domains using external DNS blocklists
+  - proxy: "block"
+    name: "dns-blocklist-pro"
+    externalHosts: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro.txt
 
-  # Rule 3: Use HTTP proxy for other external domains
+  # Rule 3: Block domains using external DNS blocklists
+  - proxy: "block"
+    name: "dns-blocklist-tif"
+    externalHosts: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/tif.txt
+
+  # Rule 4: Use HTTP proxy for other external domains
   - name: "External Domains"
     proxy: "http"
     hosts: "*.external.com api.*.com"
-
-  # Rule 4: Block specific domains with external rule lists
-  - name: "Blocked Domains"
-    proxy: "block"
-    externalHosts: "https://raw.githubusercontent.com/example/malicious-domains/main/blocklist.txt"
-    externalURLs: "./local-blocklist.txt"
 
   # Rule 5: Load complete rule configuration from external YAML file
   - name: "External Rule Configuration"
@@ -197,17 +195,17 @@ Configuration can be reloaded without restarting the server:
 
 ## Rule Matching Logic
 
-GoProxy uses sophisticated pattern matching:
+GoProxy uses sophisticated pattern matching with intelligent caching:
 
 ### Host Matching
-- Supports wildcards: `*.example.com` matches `sub.example.com` but not `example.com`
-- Automatically expands wildcards: `*.example.com` also matches `example.com`
-- Handles ports: `example.com:8080` is properly parsed
+- Supports wildcards: `*.example.com` matches both `sub.example.com` and `example.com`
+- Automatically handles ports: `example.com:8080` is properly parsed
+- Cached pattern matching for performance
 
 ### IP Matching
 - CIDR notation: `192.168.1.0/24`
 - Individual IPs: `192.168.1.1`
-- Domain resolution: Hostnames are resolved to IPs for matching
+- Domain resolution: Hostnames are resolved to IPs for matching with DNS caching
 
 ### URL Matching
 - Full URL patterns: `https://api.example.com/v1/*`
@@ -219,9 +217,10 @@ GoProxy uses sophisticated pattern matching:
    - External rule files (`externalRule`) are loaded first
    - Fields from external rule are merged with main rule (Ips, Hosts, URLs, etc.)
    - External rule lists (`externalIps`, `externalHosts`, `externalURLs`) are loaded and parsed
-3. First matching rule determines the proxy to use
-4. If no rules match, the `defaultProxy` is used
-5. Inverted rules (`not: true`) match everything EXCEPT the specified patterns
+3. Matching is attempted in this order: URL → Host → IP
+4. First matching rule determines the proxy to use
+5. If no rules match, the `defaultProxy` is used
+6. Inverted rules (`not: true`) match everything EXCEPT the specified patterns
 
 ### External Rule Merging
 When using `externalRule`, fields are merged as follows:
@@ -259,18 +258,19 @@ Example:
 ### Core Components
 
 - **Main Application** ([`main.go`](main.go)): Orchestrates the proxy server and system tray
-- **Configuration Management** ([`config/`](config/)): YAML config parsing and management with external rule loading
-- **Proxy Handler** ([`handler/`](handler/)): HTTP request handling and routing logic
-- **Caching System** ([`cache/`](cache/)): DNS, pattern, and external rule caching for performance
+- **Configuration Management** ([`config/`](config/)): YAML config parsing and management
+- **Proxy Handler** ([`handler/`](handler/)): HTTP request handling and routing logic with support for HTTP, HTTPS, and SOCKS5
+- **Caching System** ([`cache/`](cache/)): DNS, pattern, and CIDR caching for performance
 - **Logging System** ([`logging/`](logging/)): Configurable logging infrastructure
 - **System Tray** ([`tray/`](tray/)): Platform-specific system tray integration
 
-### Key Design Patterns
+### Proxy Handler Features
 
-- **Singleton Config Manager**: Thread-safe configuration access
-- **Strategy Pattern**: Different proxy implementations (direct, HTTP, SOCKS5, block)
-- **Observer Pattern**: Hot-reload configuration changes
-- **Factory Pattern**: Proxy handler creation based on configuration
+- **HTTP/HTTPS Support**: Full HTTP proxy functionality with CONNECT method support
+- **SOCKS5 Support**: SOCKS5 proxy connections with authentication
+- **Connection Pooling**: Efficient connection reuse
+- **Authentication**: Support for proxy authentication (Basic Auth for HTTP, User/Pass for SOCKS5)
+- **Blocking**: Configurable request blocking with proper HTTP error responses
 
 ## Development
 
@@ -279,7 +279,8 @@ Example:
 - [`github.com/elazarl/goproxy`](https://github.com/elazarl/goproxy): Core proxy functionality
 - [`github.com/getlantern/systray`](https://github.com/getlantern/systray): System tray integration
 - [`github.com/gobwas/glob`](https://github.com/gobwas/glob): Pattern matching
-- [`gopkg.in/natefinch/lumberjack.v2`](https://github.com/natefinch/lumberjack): Log rotation
+- [`github.com/hashicorp/golang-lru/v2`](https://github.com/hashicorp/golang-lru): LRU caching
+- [`golang.org/x/net/proxy`](https://pkg.go.dev/golang.org/x/net/proxy): SOCKS5 proxy support
 - [`gopkg.in/yaml.v3`](https://github.com/go-yaml/yaml): YAML configuration parsing
 
 ### Building and Testing
@@ -287,6 +288,12 @@ Example:
 ```bash
 # Build for current platform
 go build -o goProxy
+
+# Run with custom config
+./goProxy -config ./config.yaml
+
+# Show version information
+./goProxy -version
 ```
 
 ## License
