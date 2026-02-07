@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	"goProxy/config"
 	"goProxy/handler"
@@ -50,9 +51,6 @@ func main() {
 	currentListenAddr := currentConfig.ListenAddr
 
 	logger.Info("Starting proxy server on %s", currentConfig.ListenAddr)
-	logger.Info("Default proxy: %s", currentConfig.GetProxyURL())
-	logger.Info("Available proxies: %v", currentConfig.Proxies)
-	logger.Info("Configuration reload signal: SIGHUP (kill -HUP %d)", os.Getpid())
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGHUP, os.Interrupt, syscall.SIGTERM)
@@ -93,22 +91,48 @@ func main() {
 		}
 	}
 
+	reloadTickerChan := make(chan time.Time)
+
+	var reloadTicker *time.Ticker
+	startTicker := func(hours int) {
+		if reloadTicker != nil {
+			reloadTicker.Stop()
+		}
+		if hours > 0 {
+			reloadTicker = time.NewTicker(time.Duration(hours) * time.Hour)
+			go func() {
+				for t := range reloadTicker.C {
+					reloadTickerChan <- t
+				}
+			}()
+		} else {
+			reloadTicker = nil
+		}
+	}
+
+	reloadConfiguration := func(trigger string) {
+		logger.Info("%s: reloading configuration...", trigger)
+		if err := configManager.ReloadConfig(); err != nil {
+			logger.Error("Error reloading configuration: %v", err)
+		} else {
+			newConfig := configManager.GetConfig()
+			if newConfig.AutoReloadHours != currentConfig.AutoReloadHours {
+				startTicker(newConfig.AutoReloadHours)
+			}
+			currentConfig = newConfig
+
+			proxyHandler.UpdateConfig(configManager)
+			restartServerIfAddressChanged()
+		}
+	}
+
 	go func() {
 		for {
 			select {
 			case sig := <-sigChan:
 				switch sig {
 				case syscall.SIGHUP:
-					logger.Info("Received SIGHUP signal, reloading configuration...")
-					if err := configManager.ReloadConfig(); err != nil {
-						logger.Error("Error reloading configuration: %v", err)
-					} else {
-						logger.Info("Configuration reloaded successfully")
-
-						proxyHandler.UpdateConfig(configManager)
-
-						restartServerIfAddressChanged()
-					}
+					reloadConfiguration("Received SIGHUP signal")
 				case os.Interrupt, syscall.SIGTERM:
 					logger.Info("Received interrupt signal, shutting down...")
 					trayManager.Exit()
@@ -122,17 +146,11 @@ func main() {
 				serverMutex.Unlock()
 				return
 			case <-trayManager.GetReloadChan():
-				if err := configManager.ReloadConfig(); err != nil {
-					logger.Error("Error reloading configuration: %v", err)
-				} else {
-					logger.Info("Configuration reloaded successfully")
-
-					proxyHandler.UpdateConfig(configManager)
-
-					restartServerIfAddressChanged()
-				}
+				reloadConfiguration("Manual reload from tray")
 			case <-trayManager.GetOpenConfigChan():
 				openConfigDirectory(*configPath, logger)
+			case <-reloadTickerChan:
+				reloadConfiguration("Periodic reload")
 			}
 		}
 	}()
@@ -141,6 +159,13 @@ func main() {
 		if err := currentServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("Server error: %v", err)
 			panic(err)
+		}
+	}()
+
+	startTicker(currentConfig.AutoReloadHours)
+	defer func() {
+		if reloadTicker != nil {
+			reloadTicker.Stop()
 		}
 	}()
 

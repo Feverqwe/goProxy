@@ -22,15 +22,16 @@ type RuleConfig struct {
 }
 
 type ProxyConfig struct {
-	DefaultProxy string            `yaml:"defaultProxy"`
-	Proxies      map[string]string `yaml:"proxies"`
-	ListenAddr   string            `yaml:"listenAddr"`
-	LogLevel     string            `yaml:"logLevel"`
-	logLevelInt  int
-	LogFile      string       `yaml:"logFile,omitempty"`
-	MaxLogSize   int          `yaml:"maxLogSize,omitempty"`
-	MaxLogFiles  int          `yaml:"maxLogFiles,omitempty"`
-	Rules        []RuleConfig `yaml:"rules"`
+	DefaultProxy    string            `yaml:"defaultProxy"`
+	Proxies         map[string]string `yaml:"proxies"`
+	ListenAddr      string            `yaml:"listenAddr"`
+	LogLevel        string            `yaml:"logLevel"`
+	logLevelInt     int
+	LogFile         string       `yaml:"logFile,omitempty"`
+	MaxLogSize      int          `yaml:"maxLogSize,omitempty"`
+	MaxLogFiles     int          `yaml:"maxLogFiles,omitempty"`
+	AutoReloadHours int          `yaml:"autoReloadHours,omitempty"`
+	Rules           []RuleConfig `yaml:"rules"`
 }
 
 const (
