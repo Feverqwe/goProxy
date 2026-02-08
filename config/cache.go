@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -33,27 +34,39 @@ func getCacheFilePath(url string) string {
 	return filepath.Join(getCacheDir(), filename)
 }
 
-func downloadAndCacheFile(url string) (string, error) {
-	return downloadAndCacheFileWithMode(url, false)
+func downloadAndCacheFile(downloadURL string, config *ProxyConfig) (string, error) {
+	return downloadAndCacheFileWithMode(downloadURL, false, config)
 }
 
-func downloadAndCacheFileWithMode(url string, cacheOnly bool) (string, error) {
-	cacheFile := getCacheFilePath(url)
+func downloadAndCacheFileWithMode(downloadURL string, cacheOnly bool, config *ProxyConfig) (string, error) {
+	cacheFile := getCacheFilePath(downloadURL)
 
 	if cacheOnly {
 		if _, err := os.Stat(cacheFile); err == nil {
 			return cacheFile, nil
 		}
-		return "", fmt.Errorf("cached file not found for %s", url)
+		return "", fmt.Errorf("cached file not found for %s", downloadURL)
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(url)
+	proxyURLStr := config.GetProxyServerURL()
+	proxyURL, err := url.Parse(proxyURLStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse proxy URL: %v", err)
+	}
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+		},
+	}
+
+	resp, err := client.Get(downloadURL)
 	if err != nil {
 		if _, cacheErr := os.Stat(cacheFile); cacheErr == nil {
 			return cacheFile, nil
 		}
-		return "", fmt.Errorf("failed to download %s: %v", url, err)
+		return "", fmt.Errorf("failed to download %s via proxy: %v", downloadURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -61,7 +74,7 @@ func downloadAndCacheFileWithMode(url string, cacheOnly bool) (string, error) {
 		if _, cacheErr := os.Stat(cacheFile); cacheErr == nil {
 			return cacheFile, nil
 		}
-		return "", fmt.Errorf("failed to download %s: status %d", url, resp.StatusCode)
+		return "", fmt.Errorf("failed to download %s via proxy: status %d", downloadURL, resp.StatusCode)
 	}
 
 	file, err := os.Create(cacheFile)

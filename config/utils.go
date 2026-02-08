@@ -64,22 +64,6 @@ func (r *RuleConfig) GetParsedURLs() []string {
 	return r.parsedURLs
 }
 
-func (c *ProxyConfig) GetProxyURL() string {
-	if c.DefaultProxy == "" {
-		return ""
-	}
-
-	proxyURL, exists := c.Proxies[c.DefaultProxy]
-	if !exists {
-
-		for _, url := range c.Proxies {
-			return url
-		}
-		return ""
-	}
-	return proxyURL
-}
-
 func (c *ProxyConfig) GetAccessLogPath() string {
 	if c.LogFile == "" {
 		return ""
@@ -107,16 +91,28 @@ func (c *ProxyConfig) GetMaxLogFiles() int {
 	return c.MaxLogFiles
 }
 
-func loadExternalRulesRelativeTo(source string, baseDir string) (string, error) {
-	return loadExternalRulesRelativeToWithMode(source, baseDir, false)
+func (c *ProxyConfig) GetProxyServerURL() string {
+	if c.ListenAddr == "" {
+		return "http://localhost:8080"
+	}
+
+	if c.ListenAddr[0] == ':' {
+		return "http://localhost" + c.ListenAddr
+	}
+
+	return "http://" + c.ListenAddr
 }
 
-func loadExternalRulesRelativeToWithMode(source string, baseDir string, cacheOnly bool) (string, error) {
+func loadExternalRulesRelativeTo(source string, baseDir string, config *ProxyConfig) (string, error) {
+	return loadExternalRulesRelativeToWithMode(source, baseDir, false, config)
+}
+
+func loadExternalRulesRelativeToWithMode(source string, baseDir string, cacheOnly bool, config *ProxyConfig) (string, error) {
 	var filePath string
 	var err error
 
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
-		filePath, err = downloadAndCacheFileWithMode(source, cacheOnly)
+		filePath, err = downloadAndCacheFileWithMode(source, cacheOnly, config)
 		if err != nil {
 			return "", err
 		}

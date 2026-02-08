@@ -137,7 +137,7 @@ func (c *ProxyConfig) loadExternalRuleFileWithMode(source string, configDir stri
 		return &RuleBaseConfig{}, nil
 	}
 
-	content, err := loadExternalRulesRelativeToWithMode(source, configDir, cacheOnly)
+	content, err := loadExternalRulesRelativeToWithMode(source, configDir, cacheOnly, c)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load external rule file: %v", err)
 	}
@@ -159,7 +159,7 @@ func (c *ProxyConfig) loadExternalRuleListWithMode(url string, expandWildcardDom
 		return []string{}
 	}
 
-	rulesContent, err := loadExternalRulesRelativeToWithMode(url, configDir, cacheOnly)
+	rulesContent, err := loadExternalRulesRelativeToWithMode(url, configDir, cacheOnly, c)
 	if err != nil {
 		fmt.Printf("Warning: Failed to load external rules from %s: %v\n", url, err)
 		return []string{}
