@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"goProxy/cache"
 	"goProxy/config"
@@ -45,11 +44,11 @@ func NewProxyDecision(config *config.ProxyConfig, cacheManager *cache.CacheManag
 
 func (d *ProxyDecision) matchesGlob(pattern, s string) bool {
 	hostWithoutPort := s
-	if strings.Contains(s, ":") {
-		hostParts := strings.Split(s, ":")
-		if len(hostParts) == 2 {
-			hostWithoutPort = hostParts[0]
-		}
+
+	if h, _, err := net.SplitHostPort(s); err == nil {
+		hostWithoutPort = h
+	} else {
+		hostWithoutPort = s
 	}
 
 	if pattern == hostWithoutPort {

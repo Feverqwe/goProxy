@@ -102,19 +102,16 @@ func (l *Logger) Printf(msg string, v ...interface{}) {
 	}
 }
 
-// Global logger functions
 func GetLogger() *Logger {
 	loggerMutex.RLock()
 	defer loggerMutex.RUnlock()
 	return globalLogger
 }
 
-// InitDefaultLogger initializes the global logger with default configuration
 func InitDefaultLogger() {
 	loggerMutex.Lock()
 	defer loggerMutex.Unlock()
 
-	// Close the existing logger if it exists
 	if globalLogger != nil {
 		globalLogger.Close()
 	}
@@ -123,27 +120,25 @@ func InitDefaultLogger() {
 }
 
 func ReconfigureGlobalLogger(config ConfigProvider) {
+	if globalLogger != nil {
+		loggerMutex.Lock()
+		globalLogger = NewLogger(config)
+		loggerMutex.Unlock()
+		return
+	}
+
+	fileLogger, err := NewFileLogger(config)
+	if err != nil {
+		log.Printf("Failed to reconfigure file logger: %v, falling back to stdout", err)
+		fileLogger = nil
+	}
+
 	loggerMutex.Lock()
 	defer loggerMutex.Unlock()
+	globalLogger.Close()
 
-	if globalLogger != nil {
-		// Close the old file logger
-		globalLogger.Close()
-
-		// Create a new logger with the updated configuration
-		fileLogger, err := NewFileLogger(config)
-		if err != nil {
-			log.Printf("Failed to reconfigure file logger: %v, falling back to stdout", err)
-			fileLogger = nil
-		}
-
-		// Update the logger with new configuration
-		globalLogger.config = config
-		globalLogger.fileLogger = fileLogger
-	} else {
-		// If no logger exists, initialize it
-		globalLogger = NewLogger(config)
-	}
+	globalLogger.config = config
+	globalLogger.fileLogger = fileLogger
 }
 
 func Debug(format string, v ...interface{}) {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -23,6 +24,15 @@ import (
 type contextKey string
 
 const proxyURLContextKey contextKey = "proxyURL"
+
+type bufferedConn struct {
+	net.Conn
+	reader io.Reader
+}
+
+func (c *bufferedConn) Read(p []byte) (int, error) {
+	return c.reader.Read(p)
+}
 
 type ProxyHandler struct {
 	decision    *ProxyDecision
@@ -53,13 +63,13 @@ func NewProxyHandler(config *config.ProxyConfig, cacheManager *cache.CacheManage
 }
 
 func (p *ProxyHandler) UpdateConfig(config *config.ProxyConfig, cache *cache.CacheManager) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	p.decision = NewProxyDecision(config, cache)
-
 	goproxyLogger := logger.NewGoproxyLoggerAdapter(logger.GetLogger())
+	decision := NewProxyDecision(config, cache)
+
+	p.mu.Lock()
+	p.decision = decision
 	p.proxyServer.Logger = goproxyLogger
+	p.mu.Unlock()
 }
 
 func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -103,6 +113,13 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 			return nil, fmt.Errorf("error connecting to HTTP proxy: %w", err)
 		}
 
+		closeConn := true
+		defer func() {
+			if closeConn {
+				conn.Close()
+			}
+		}()
+
 		connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", addr, addr)
 
 		if parsedURL.User != nil {
@@ -115,24 +132,25 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 		connectReq += "\r\n"
 
 		if _, err := conn.Write([]byte(connectReq)); err != nil {
-			conn.Close()
 			return nil, fmt.Errorf("error sending CONNECT request: %w", err)
 		}
 
 		reader := bufio.NewReader(conn)
 		resp, err := http.ReadResponse(reader, nil)
 		if err != nil {
-			conn.Close()
 			return nil, fmt.Errorf("error reading proxy response: %w", err)
 		}
 		resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			conn.Close()
 			return nil, fmt.Errorf("proxy CONNECT failed with status: %d %s", resp.StatusCode, resp.Status)
 		}
 
-		return conn, nil
+		closeConn = false
+		return &bufferedConn{
+			Conn:   conn,
+			reader: io.MultiReader(reader, conn),
+		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported proxy scheme: %s", parsedURL.Scheme)
 	}
@@ -140,8 +158,10 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 
 func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isHTTPS bool) {
 	p.mu.RLock()
-	proxyURL, decisionResult, err := p.decision.GetProxyForRequest(r)
+	currentDecision := p.decision
 	p.mu.RUnlock()
+
+	proxyURL, decisionResult, err := currentDecision.GetProxyForRequest(r)
 
 	if err != nil {
 		logger.Error("Error getting proxy decision: %v", err)
