@@ -77,15 +77,15 @@ func LoadConfig(configPath string, cacheManager *cache.CacheManager, cacheOnly b
 		}
 	}
 
-	config.logLevelInt = parseLogLevel(config.LogLevel)
-	logger.ReconfigureGlobalLogger(config)
-
 	config.afterLoad(nil)
 
 	return config, nil
 }
 
 func (c *ProxyConfig) afterLoad(httpClientFunc HTTPClientFunc) {
+	c.logLevelInt = parseLogLevel(c.LogLevel)
+	logger.ReconfigureGlobalLogger(c)
+
 	configDir := filepath.Dir(c.configPath)
 
 	c.preParseRuleLists(configDir, false, httpClientFunc)
