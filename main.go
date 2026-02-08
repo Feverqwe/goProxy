@@ -121,9 +121,7 @@ func main() {
 		}
 	}()
 
-	go func() {
-		startServer(currentConfig.ListenAddr)
-	}()
+	startServer(currentConfig.ListenAddr)
 
 	tickerManager.StartTicker(currentConfig.AutoReloadHours)
 
