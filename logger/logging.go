@@ -15,9 +15,8 @@ const (
 )
 
 var (
-	globalLogger     *Logger
-	globalLoggerOnce sync.Once
-	loggerMutex      sync.RWMutex
+	globalLogger *Logger
+	loggerMutex  sync.RWMutex
 )
 
 type Logger struct {
@@ -110,24 +109,6 @@ func GetLogger() *Logger {
 	return globalLogger
 }
 
-func SetLogger(logger *Logger) {
-	loggerMutex.Lock()
-	defer loggerMutex.Unlock()
-	globalLogger = logger
-}
-
-func InitGlobalLogger(config ConfigProvider) {
-	loggerMutex.Lock()
-	defer loggerMutex.Unlock()
-
-	// Close the existing logger if it exists
-	if globalLogger != nil {
-		globalLogger.Close()
-	}
-
-	globalLogger = NewLogger(config)
-}
-
 // InitDefaultLogger initializes the global logger with default configuration
 func InitDefaultLogger() {
 	loggerMutex.Lock()
@@ -189,12 +170,6 @@ func Error(format string, v ...interface{}) {
 	}
 }
 
-func Printf(msg string, v ...interface{}) {
-	if logger := GetLogger(); logger != nil {
-		logger.Printf(msg, v...)
-	}
-}
-
 type GoproxyLoggerAdapter struct {
 	logger *Logger
 }
@@ -202,17 +177,11 @@ type GoproxyLoggerAdapter struct {
 func (g *GoproxyLoggerAdapter) Printf(msg string, v ...interface{}) {
 	switch {
 	case strings.Contains(msg, "WARN:"):
-		if g.logger.config.ShouldLog(LogLevelWarn) {
-			g.logger.Printf(msg, v...)
-		}
+		g.logger.Warn(msg, v...)
 	case strings.Contains(msg, "INFO:"):
-		if g.logger.config.ShouldLog(LogLevelInfo) {
-			g.logger.Printf(msg, v...)
-		}
+		g.logger.Info(msg, v...)
 	default:
-		if g.logger.config.ShouldLog(LogLevelError) {
-			g.logger.Printf(msg, v...)
-		}
+		g.logger.Error(msg, v...)
 	}
 }
 

@@ -92,18 +92,6 @@ func (c *ProxyConfig) GetMaxLogFiles() int {
 	return c.MaxLogFiles
 }
 
-func (c *ProxyConfig) GetProxyServerURL() string {
-	if c.ListenAddr == "" {
-		return "http://localhost:8080"
-	}
-
-	if c.ListenAddr[0] == ':' {
-		return "http://localhost" + c.ListenAddr
-	}
-
-	return "http://" + c.ListenAddr
-}
-
 func loadExternalRules(source string, baseDir string, cacheOnly bool, httpClientFunc HTTPClientFunc) (string, error) {
 	var filePath string
 	var err error
