@@ -80,7 +80,7 @@ func LoadConfig(configPath string) (*ProxyConfig, error) {
 	config.logLevelInt = parseLogLevel(config.LogLevel)
 
 	configDir := filepath.Dir(configPath)
-	config.preParseRuleLists(configDir)
+	config.preParseRuleListsWithMode(configDir, true)
 
 	return config, nil
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"sync"
 )
 
@@ -38,4 +39,12 @@ func (cm *ConfigManager) ReloadConfig() error {
 
 	cm.config = newConfig
 	return nil
+}
+
+func (cm *ConfigManager) RefreshExternalRules() {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	configDir := filepath.Dir(cm.configPath)
+	cm.config.RefreshExternalRules(configDir)
 }

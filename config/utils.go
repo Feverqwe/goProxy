@@ -108,11 +108,15 @@ func (c *ProxyConfig) GetMaxLogFiles() int {
 }
 
 func loadExternalRulesRelativeTo(source string, baseDir string) (string, error) {
+	return loadExternalRulesRelativeToWithMode(source, baseDir, false)
+}
+
+func loadExternalRulesRelativeToWithMode(source string, baseDir string, cacheOnly bool) (string, error) {
 	var filePath string
 	var err error
 
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
-		filePath, err = downloadAndCacheFile(source)
+		filePath, err = downloadAndCacheFileWithMode(source, cacheOnly)
 		if err != nil {
 			return "", err
 		}

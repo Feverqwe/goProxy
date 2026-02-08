@@ -150,7 +150,8 @@ func main() {
 			case <-trayManager.GetOpenConfigChan():
 				openConfigDirectory(*configPath, logger)
 			case <-reloadTickerChan:
-				reloadConfiguration("Periodic reload")
+				logger.Info("Periodic reload: update external rules")
+				configManager.RefreshExternalRules()
 			}
 		}
 	}()
@@ -160,6 +161,11 @@ func main() {
 			logger.Error("Server error: %v", err)
 			panic(err)
 		}
+	}()
+
+	go func() {
+		time.Sleep(2 * time.Second)
+		configManager.RefreshExternalRules()
 	}()
 
 	startTicker(currentConfig.AutoReloadHours)

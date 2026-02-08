@@ -34,7 +34,18 @@ func getCacheFilePath(url string) string {
 }
 
 func downloadAndCacheFile(url string) (string, error) {
+	return downloadAndCacheFileWithMode(url, false)
+}
+
+func downloadAndCacheFileWithMode(url string, cacheOnly bool) (string, error) {
 	cacheFile := getCacheFilePath(url)
+
+	if cacheOnly {
+		if _, err := os.Stat(cacheFile); err == nil {
+			return cacheFile, nil
+		}
+		return "", fmt.Errorf("cached file not found for %s", url)
+	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get(url)

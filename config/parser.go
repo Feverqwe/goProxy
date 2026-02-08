@@ -51,11 +51,15 @@ func ParseStringToList(input string, expandWildcardDomains bool) []string {
 }
 
 func (c *ProxyConfig) preParseRuleLists(configDir string) {
+	c.preParseRuleListsWithMode(configDir, false)
+}
+
+func (c *ProxyConfig) preParseRuleListsWithMode(configDir string, cacheOnly bool) {
 	for i := range c.Rules {
 		rule := &c.Rules[i]
 
 		if rule.ExternalRule != "" {
-			externalRule, err := c.loadExternalRuleFile(rule.ExternalRule, configDir)
+			externalRule, err := c.loadExternalRuleFileWithMode(rule.ExternalRule, configDir, cacheOnly)
 			if err != nil {
 				fmt.Printf("Warning: Failed to load external rule file from %s: %v\n", rule.ExternalRule, err)
 			} else {
@@ -91,7 +95,7 @@ func (c *ProxyConfig) preParseRuleLists(configDir string) {
 				wg.Add(1)
 				go func(source string, expandWildcards bool, result *[]string) {
 					defer wg.Done()
-					rules := c.loadExternalRuleList(source, expandWildcards, configDir)
+					rules := c.loadExternalRuleListWithMode(source, expandWildcards, configDir, cacheOnly)
 					mu.Lock()
 					*result = append(*result, rules...)
 					mu.Unlock()
@@ -101,6 +105,10 @@ func (c *ProxyConfig) preParseRuleLists(configDir string) {
 
 		wg.Wait()
 	}
+}
+
+func (c *ProxyConfig) RefreshExternalRules(configDir string) {
+	c.preParseRuleListsWithMode(configDir, false)
 }
 
 func (c *ProxyConfig) mergeRuleFields(mainRule *RuleConfig, externalRule *RuleBaseConfig) {
@@ -121,11 +129,15 @@ func (c *ProxyConfig) mergeRuleFields(mainRule *RuleConfig, externalRule *RuleBa
 }
 
 func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string) (*RuleBaseConfig, error) {
+	return c.loadExternalRuleFileWithMode(source, configDir, false)
+}
+
+func (c *ProxyConfig) loadExternalRuleFileWithMode(source string, configDir string, cacheOnly bool) (*RuleBaseConfig, error) {
 	if source == "" {
 		return &RuleBaseConfig{}, nil
 	}
 
-	content, err := loadExternalRulesRelativeTo(source, configDir)
+	content, err := loadExternalRulesRelativeToWithMode(source, configDir, cacheOnly)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load external rule file: %v", err)
 	}
@@ -139,11 +151,15 @@ func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string) (*Ru
 }
 
 func (c *ProxyConfig) loadExternalRuleList(url string, expandWildcardDomains bool, configDir string) []string {
+	return c.loadExternalRuleListWithMode(url, expandWildcardDomains, configDir, false)
+}
+
+func (c *ProxyConfig) loadExternalRuleListWithMode(url string, expandWildcardDomains bool, configDir string, cacheOnly bool) []string {
 	if url == "" {
 		return []string{}
 	}
 
-	rulesContent, err := loadExternalRulesRelativeTo(url, configDir)
+	rulesContent, err := loadExternalRulesRelativeToWithMode(url, configDir, cacheOnly)
 	if err != nil {
 		fmt.Printf("Warning: Failed to load external rules from %s: %v\n", url, err)
 		return []string{}
