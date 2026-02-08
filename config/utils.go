@@ -104,7 +104,7 @@ func (c *ProxyConfig) GetProxyServerURL() string {
 	return "http://" + c.ListenAddr
 }
 
-func loadExternalRules(source string, baseDir string, cacheOnly bool, httpClientFunc HTTPClientNoConfigFunc) (string, error) {
+func loadExternalRules(source string, baseDir string, cacheOnly bool, httpClientFunc HTTPClientFunc) (string, error) {
 	var filePath string
 	var err error
 

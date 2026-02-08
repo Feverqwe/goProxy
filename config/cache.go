@@ -34,7 +34,7 @@ func getCacheFilePath(url string) string {
 	return filepath.Join(getCacheDir(), filename)
 }
 
-func downloadAndCacheFile(downloadURL string, cacheOnly bool, httpClientFunc HTTPClientNoConfigFunc) (string, error) {
+func downloadAndCacheFile(downloadURL string, cacheOnly bool, httpClientFunc HTTPClientFunc) (string, error) {
 	cacheFile := getCacheFilePath(downloadURL)
 
 	if cacheOnly {

@@ -32,12 +32,8 @@ type ProxyHandler struct {
 	mu            sync.RWMutex
 }
 
-func NewProxyHandler(configManager *config.ConfigManager) *ProxyHandler {
+func NewProxyHandler(configManager *config.ConfigManager, cacheManager *cache.CacheManager) *ProxyHandler {
 	config := configManager.GetConfig()
-
-	cacheManager := cache.NewCacheManager()
-
-	cacheManager.PrecompilePatterns(config.GetAllHosts(), config.GetAllURLs(), config.GetAllIps())
 
 	decision := NewProxyDecision(config, cacheManager)
 
@@ -68,8 +64,6 @@ func (p *ProxyHandler) UpdateConfig(configManager *config.ConfigManager) {
 
 	p.configManager = configManager
 	config := configManager.GetConfig()
-
-	p.cache.PrecompilePatterns(config.GetAllHosts(), config.GetAllURLs(), config.GetAllIps())
 
 	p.decision = NewProxyDecision(config, p.cache)
 
@@ -206,15 +200,14 @@ func capitalize(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-func (p *ProxyHandler) GetHTTPClient(targetURL string, config *config.ProxyConfig) (*http.Client, error) {
+func (p *ProxyHandler) GetHTTPClient(targetURL string) (*http.Client, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	parsedURL, decisionResult, err := p.decision.GetProxyForURL(targetURL)
+	proxyURL, parsedURL, decisionResult, err := p.decision.GetProxyForURL(targetURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get proxy decision: %v", err)
 	}
-	proxyURL := config.Proxies[decisionResult.Proxy]
 
 	isHTTPS := parsedURL.Scheme == "https"
 	target := parsedURL.Host
@@ -223,23 +216,21 @@ func (p *ProxyHandler) GetHTTPClient(targetURL string, config *config.ProxyConfi
 		return nil, fmt.Errorf("request blocked by proxy configuration")
 	}
 
-	var transport *http.Transport
+	transport := http.Transport{}
 
 	if proxyURL == "" {
 		logger.Info("Direct %s to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
 	} else {
-		transport = &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				ctx = context.WithValue(ctx, proxyURLContextKey, proxyURL)
-				return p.dialContext(ctx, network, addr)
-			},
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			ctx = context.WithValue(ctx, proxyURLContextKey, proxyURL)
+			return p.dialContext(ctx, network, addr)
 		}
 		logger.Info("%s to %s via proxy %s (rule: '%s')", capitalize(getRequestType(isHTTPS)), target, decisionResult.Proxy, decisionResult.RuleName)
 	}
 
 	return &http.Client{
 		Timeout:   30 * time.Second,
-		Transport: transport,
+		Transport: &transport,
 	}, nil
 }
 

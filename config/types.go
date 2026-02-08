@@ -1,9 +1,11 @@
 package config
 
-import "net/http"
+import (
+	"goProxy/cache"
+	"net/http"
+)
 
-type HTTPClientFunc func(string, *ProxyConfig) (*http.Client, error)
-type HTTPClientNoConfigFunc func(string) (*http.Client, error)
+type HTTPClientFunc func(string) (*http.Client, error)
 
 type Logger interface {
 	Debug(format string, v ...interface{})
@@ -23,7 +25,6 @@ type RuleBaseConfig struct {
 	ExternalHosts string `yaml:"externalHosts,omitempty"`
 	ExternalURLs  string `yaml:"externalURLs,omitempty"`
 	ExternalRule  string `yaml:"externalRule,omitempty"`
-	Not           bool   `yaml:"not,omitempty"`
 
 	parsedIps   []string
 	parsedHosts []string
@@ -33,6 +34,7 @@ type RuleBaseConfig struct {
 type RuleConfig struct {
 	RuleBaseConfig `yaml:",inline"`
 	Proxy          string `yaml:"proxy,omitempty"`
+	Not            bool   `yaml:"not,omitempty"`
 }
 
 type ProxyConfig struct {
@@ -40,10 +42,12 @@ type ProxyConfig struct {
 	Proxies         map[string]string `yaml:"proxies"`
 	ListenAddr      string            `yaml:"listenAddr"`
 	LogLevel        string            `yaml:"logLevel"`
-	logLevelInt     int
-	LogFile         string       `yaml:"logFile,omitempty"`
-	MaxLogSize      int          `yaml:"maxLogSize,omitempty"`
-	MaxLogFiles     int          `yaml:"maxLogFiles,omitempty"`
-	AutoReloadHours int          `yaml:"autoReloadHours,omitempty"`
-	Rules           []RuleConfig `yaml:"rules"`
+	LogFile         string            `yaml:"logFile,omitempty"`
+	MaxLogSize      int               `yaml:"maxLogSize,omitempty"`
+	MaxLogFiles     int               `yaml:"maxLogFiles,omitempty"`
+	AutoReloadHours int               `yaml:"autoReloadHours,omitempty"`
+	Rules           []RuleConfig      `yaml:"rules"`
+
+	logLevelInt int
+	cache       *cache.CacheManager
 }

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"goProxy/cache"
 	"goProxy/config"
 	"goProxy/handler"
 	"goProxy/logger"
@@ -33,14 +34,16 @@ func main() {
 		return
 	}
 
-	configManager, err := config.NewConfigManager(*configPath)
+	cacheManager := cache.NewCacheManager()
+
+	configManager, err := config.NewConfigManager(*configPath, cacheManager)
 	if err != nil {
 		panic(err)
 	}
 
 	currentConfig := configManager.GetConfig()
 
-	proxyHandler := handler.NewProxyHandler(configManager)
+	proxyHandler := handler.NewProxyHandler(configManager, cacheManager)
 
 	server := &http.Server{
 		Addr:    currentConfig.ListenAddr,
@@ -111,20 +114,27 @@ func main() {
 		}
 	}
 
+	refreshExternalRules := func() {
+		configManager.RefreshExternalRules(proxyHandler.GetHTTPClient)
+	}
+
 	reloadConfiguration := func(trigger string) {
 		logger.Info("%s: reloading configuration...", trigger)
 		if err := configManager.ReloadConfig(); err != nil {
 			logger.Error("Error reloading configuration: %v", err)
-		} else {
-			newConfig := configManager.GetConfig()
-			if newConfig.AutoReloadHours != currentConfig.AutoReloadHours {
-				startTicker(newConfig.AutoReloadHours)
-			}
-			currentConfig = newConfig
-
-			proxyHandler.UpdateConfig(configManager)
-			restartServerIfAddressChanged()
+			return
 		}
+
+		newConfig := configManager.GetConfig()
+
+		if newConfig.AutoReloadHours != currentConfig.AutoReloadHours {
+			startTicker(newConfig.AutoReloadHours)
+		}
+		currentConfig = newConfig
+
+		proxyHandler.UpdateConfig(configManager)
+
+		restartServerIfAddressChanged()
 	}
 
 	go func() {
@@ -152,7 +162,7 @@ func main() {
 				openConfigDirectory(*configPath)
 			case <-reloadTickerChan:
 				logger.Info("Periodic reload: update external rules")
-				configManager.RefreshExternalRules(proxyHandler.GetHTTPClient)
+				refreshExternalRules()
 			}
 		}
 	}()
@@ -165,8 +175,7 @@ func main() {
 	}()
 
 	go func() {
-		time.Sleep(2 * time.Second)
-		configManager.RefreshExternalRules(proxyHandler.GetHTTPClient)
+		refreshExternalRules()
 	}()
 
 	startTicker(currentConfig.AutoReloadHours)

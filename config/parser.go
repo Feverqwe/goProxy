@@ -3,14 +3,13 @@ package config
 import (
 	"fmt"
 	"goProxy/logger"
-	"net/http"
 	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
 )
 
-func ParseStringToList(input string, expandWildcardDomains bool) []string {
+func parseStringToList(input string, expandWildcardDomains bool) []string {
 	if input == "" {
 		return []string{}
 	}
@@ -53,25 +52,21 @@ func ParseStringToList(input string, expandWildcardDomains bool) []string {
 }
 
 func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc) {
-	getHttpClient := func(targetUrl string) (*http.Client, error) {
-		return httpClientFunc(targetUrl, c)
-	}
-
 	for i := range c.Rules {
 		rule := &c.Rules[i]
 
+		externalRule := &RuleBaseConfig{}
 		if rule.ExternalRule != "" {
-			externalRule, err := c.loadExternalRuleFile(rule.ExternalRule, configDir, cacheOnly, getHttpClient)
+			var err error
+			externalRule, err = c.loadExternalRuleFile(rule.ExternalRule, configDir, cacheOnly, httpClientFunc)
 			if err != nil {
 				logger.Warn("Failed to load external rule file from %s: %v", rule.ExternalRule, err)
-			} else {
-				c.mergeRuleFields(rule, externalRule)
 			}
 		}
 
-		rule.parsedIps = ParseStringToList(rule.Ips, false)
-		rule.parsedHosts = ParseStringToList(rule.Hosts, true)
-		rule.parsedURLs = ParseStringToList(rule.URLs, false)
+		parsedIps := parseStringToList(strings.TrimSpace(rule.Ips+"\n"+externalRule.Ips), false)
+		parsedHosts := parseStringToList(strings.TrimSpace(rule.Hosts+"\n"+externalRule.Hosts), true)
+		parsedURLs := parseStringToList(strings.TrimSpace(rule.URLs+"\n"+externalRule.URLs), false)
 
 		type loadTask struct {
 			sources         []string
@@ -80,9 +75,9 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 		}
 
 		tasks := []loadTask{
-			{ParseStringToList(rule.ExternalIps, false), false, &rule.parsedIps},
-			{ParseStringToList(rule.ExternalHosts, false), true, &rule.parsedHosts},
-			{ParseStringToList(rule.ExternalURLs, false), false, &rule.parsedURLs},
+			{parseStringToList(strings.TrimSpace(rule.ExternalIps+"\n"+externalRule.ExternalIps), false), false, &parsedIps},
+			{parseStringToList(strings.TrimSpace(rule.ExternalHosts+"\n"+externalRule.ExternalHosts), false), true, &parsedHosts},
+			{parseStringToList(strings.TrimSpace(rule.ExternalURLs+"\n"+externalRule.ExternalURLs), false), false, &parsedURLs},
 		}
 
 		var wg sync.WaitGroup
@@ -97,7 +92,7 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 				wg.Add(1)
 				go func(source string, expandWildcards bool, result *[]string) {
 					defer wg.Done()
-					rules := c.loadExternalRuleList(source, expandWildcards, configDir, cacheOnly, getHttpClient)
+					rules := c.loadExternalRuleList(source, expandWildcards, configDir, cacheOnly, httpClientFunc)
 					mu.Lock()
 					*result = append(*result, rules...)
 					mu.Unlock()
@@ -106,31 +101,24 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 		}
 
 		wg.Wait()
+
+		if rule.Name == "" && externalRule.Name != "" {
+			rule.Name = externalRule.Name
+		}
+
+		rule.parsedHosts = parsedHosts
+		rule.parsedIps = parsedIps
+		rule.parsedURLs = parsedURLs
 	}
+
+	c.cache.PrecompilePatterns(c.GetAllHosts(), c.GetAllURLs(), c.GetAllIps())
 }
 
 func (c *ProxyConfig) RefreshExternalRules(configDir string, httpClientFunc HTTPClientFunc) {
 	c.preParseRuleLists(configDir, false, httpClientFunc)
 }
 
-func (c *ProxyConfig) mergeRuleFields(mainRule *RuleConfig, externalRule *RuleBaseConfig) {
-	if mainRule.Name == "" && externalRule.Name != "" {
-		mainRule.Name = externalRule.Name
-	}
-	if !mainRule.Not && externalRule.Not {
-		mainRule.Not = externalRule.Not
-	}
-
-	mainRule.Ips = strings.TrimSpace(mainRule.Ips + "\n" + externalRule.Ips)
-	mainRule.Hosts = strings.TrimSpace(mainRule.Hosts + "\n" + externalRule.Hosts)
-	mainRule.URLs = strings.TrimSpace(mainRule.URLs + "\n" + externalRule.URLs)
-
-	mainRule.ExternalIps = strings.TrimSpace(mainRule.ExternalIps + "\n" + externalRule.ExternalIps)
-	mainRule.ExternalHosts = strings.TrimSpace(mainRule.ExternalHosts + "\n" + externalRule.ExternalHosts)
-	mainRule.ExternalURLs = strings.TrimSpace(mainRule.ExternalURLs + "\n" + externalRule.ExternalURLs)
-}
-
-func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string, cacheOnly bool, httpClientFunc HTTPClientNoConfigFunc) (*RuleBaseConfig, error) {
+func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc) (*RuleBaseConfig, error) {
 	if source == "" {
 		return &RuleBaseConfig{}, nil
 	}
@@ -148,7 +136,7 @@ func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string, cach
 	return &externalRule, nil
 }
 
-func (c *ProxyConfig) loadExternalRuleList(url string, expandWildcardDomains bool, configDir string, cacheOnly bool, httpClientFunc HTTPClientNoConfigFunc) []string {
+func (c *ProxyConfig) loadExternalRuleList(url string, expandWildcardDomains bool, configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc) []string {
 	if url == "" {
 		return []string{}
 	}
@@ -159,5 +147,5 @@ func (c *ProxyConfig) loadExternalRuleList(url string, expandWildcardDomains boo
 		return []string{}
 	}
 
-	return ParseStringToList(rulesContent, expandWildcardDomains)
+	return parseStringToList(rulesContent, expandWildcardDomains)
 }

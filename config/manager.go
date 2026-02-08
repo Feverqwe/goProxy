@@ -1,19 +1,21 @@
 package config
 
 import (
+	"goProxy/cache"
 	"goProxy/logger"
 	"path/filepath"
 	"sync"
 )
 
 type ConfigManager struct {
+	cache      *cache.CacheManager
 	config     *ProxyConfig
 	configPath string
 	mu         sync.RWMutex
 }
 
-func NewConfigManager(configPath string) (*ConfigManager, error) {
-	config, err := LoadConfig(configPath)
+func NewConfigManager(configPath string, cacheManager *cache.CacheManager) (*ConfigManager, error) {
+	config, err := LoadConfig(configPath, cacheManager, true)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +38,7 @@ func (cm *ConfigManager) ReloadConfig() error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	newConfig, err := LoadConfig(cm.configPath)
+	newConfig, err := LoadConfig(cm.configPath, cm.cache, false)
 	if err != nil {
 		return err
 	}

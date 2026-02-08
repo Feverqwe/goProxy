@@ -2,13 +2,14 @@ package config
 
 import (
 	"fmt"
+	"goProxy/cache"
 	"os"
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
 
-func LoadConfig(configPath string) (*ProxyConfig, error) {
+func LoadConfig(configPath string, cacheManager *cache.CacheManager, cacheOnly bool) (*ProxyConfig, error) {
 	config := &ProxyConfig{
 		DefaultProxy: "direct",
 		Proxies: map[string]string{
@@ -35,10 +36,10 @@ func LoadConfig(configPath string) (*ProxyConfig, error) {
 			{
 				RuleBaseConfig: RuleBaseConfig{
 					Name:  "Inverted Proxy Rule",
-					Not:   true,
 					Hosts: "*.google.com *.youtube.com",
 				},
 				Proxy: "socks5",
+				Not:   true,
 			},
 			{
 				RuleBaseConfig: RuleBaseConfig{
@@ -55,6 +56,7 @@ func LoadConfig(configPath string) (*ProxyConfig, error) {
 				Proxy: "block",
 			},
 		},
+		cache: cacheManager,
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
@@ -79,7 +81,8 @@ func LoadConfig(configPath string) (*ProxyConfig, error) {
 	config.logLevelInt = parseLogLevel(config.LogLevel)
 
 	configDir := filepath.Dir(configPath)
-	config.preParseRuleLists(configDir, true, nil)
+
+	config.preParseRuleLists(configDir, cacheOnly, nil)
 
 	return config, nil
 }
