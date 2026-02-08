@@ -73,23 +73,52 @@ func main() {
 		currentServer = newServer
 	}
 
-	reloadTickerChan := make(chan time.Time)
+	reloadTickerChan := make(chan struct{}, 1)
 
 	var reloadTicker *time.Ticker
-	startTicker := func(hours int) {
+	var tickerStopChan chan struct{}
+	var tickerMutex sync.Mutex
+
+	stopOldTicker := func() {
+		tickerMutex.Lock()
+		defer tickerMutex.Unlock()
+		if tickerStopChan != nil {
+			close(tickerStopChan)
+			tickerStopChan = nil
+		}
 		if reloadTicker != nil {
 			reloadTicker.Stop()
 		}
-		if hours > 0 {
-			reloadTicker = time.NewTicker(time.Duration(hours) * time.Hour)
-			go func() {
-				for t := range reloadTicker.C {
-					reloadTickerChan <- t
-				}
-			}()
-		} else {
-			reloadTicker = nil
+	}
+
+	startTicker := func(hours int) {
+		stopOldTicker()
+
+		if hours <= 0 {
+			return
 		}
+
+		tickerMutex.Lock()
+		tickerStopChan = make(chan struct{})
+		reloadTicker = time.NewTicker(time.Duration(hours) * time.Hour)
+		currentStopChan := tickerStopChan
+		currentTicker := reloadTicker
+		tickerMutex.Unlock()
+
+		go func() {
+			for {
+				select {
+				case <-currentTicker.C:
+					select {
+					case reloadTickerChan <- struct{}{}:
+					default:
+						// Если релоад уже в очереди, пропускаем
+					}
+				case <-currentStopChan:
+					return // Выход из горутины при остановке тикера
+				}
+			}
+		}()
 	}
 
 	reloadConfiguration := func(trigger string) {
@@ -150,9 +179,7 @@ func main() {
 	go func() {
 		<-trayManager.GetQuitChan()
 
-		if reloadTicker != nil {
-			reloadTicker.Stop()
-		}
+		stopOldTicker()
 
 		logger.Info("Shutting down proxy server...")
 		if err := currentServer.Close(); err != nil {

@@ -56,7 +56,6 @@ func NewProxyHandler(config *config.ProxyConfig, cacheManager *cache.CacheManage
 
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.DialContext = handler.dialContext
-
 	proxyServer.Tr = tr
 
 	return handler
@@ -82,8 +81,13 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 		return nil, fmt.Errorf("connection blocked by proxy configuration")
 	}
 
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+
 	if proxyURL == "" {
-		return net.Dial(network, addr)
+		return dialer.DialContext(ctx, network, addr)
 	}
 
 	parsedURL, err := url.Parse(proxyURL)
@@ -102,13 +106,13 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 				auth.Password = password
 			}
 		}
-		dialer, err := proxy.SOCKS5("tcp", parsedURL.Host, auth, proxy.Direct)
+		proxyDialer, err := proxy.SOCKS5("tcp", parsedURL.Host, auth, dialer)
 		if err != nil {
 			return nil, fmt.Errorf("error creating SOCKS5 dialer: %w", err)
 		}
-		return dialer.Dial(network, addr)
+		return proxyDialer.Dial(network, addr)
 	case "http", "https":
-		conn, err := net.Dial("tcp", parsedURL.Host)
+		conn, err := dialer.DialContext(ctx, "tcp", parsedURL.Host)
 		if err != nil {
 			return nil, fmt.Errorf("error connecting to HTTP proxy: %w", err)
 		}
@@ -119,6 +123,8 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 				conn.Close()
 			}
 		}()
+
+		conn.SetDeadline(time.Now().Add(10 * time.Second))
 
 		connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", addr, addr)
 
@@ -145,6 +151,8 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("proxy CONNECT failed with status: %d %s", resp.StatusCode, resp.Status)
 		}
+
+		conn.SetDeadline(time.Time{})
 
 		closeConn = false
 		return &bufferedConn{
@@ -211,8 +219,10 @@ func capitalize(s string) string {
 
 func (p *ProxyHandler) GetHTTPClient(targetURL string) (*http.Client, error) {
 	p.mu.RLock()
-	proxyURL, parsedURL, decisionResult, err := p.decision.GetProxyForURL(targetURL)
+	currentDecision := p.decision
 	p.mu.RUnlock()
+
+	proxyURL, parsedURL, decisionResult, err := currentDecision.GetProxyForURL(targetURL)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get proxy decision: %v", err)
@@ -225,22 +235,33 @@ func (p *ProxyHandler) GetHTTPClient(targetURL string) (*http.Client, error) {
 		return nil, fmt.Errorf("request blocked by proxy configuration")
 	}
 
-	transport := http.Transport{}
+	var transport http.RoundTripper
 
 	if proxyURL == "" {
+		transport = http.DefaultTransport
 		logger.Info("Direct %s to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
 	} else {
-		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			ctx = context.WithValue(ctx, proxyURLContextKey, proxyURL)
-			return p.dialContext(ctx, network, addr)
+		transport = &roundTripperWithContext{
+			base:     p.proxyServer.Tr,
+			proxyURL: proxyURL,
 		}
 		logger.Info("%s to %s via proxy %s (rule: '%s')", capitalize(getRequestType(isHTTPS)), target, decisionResult.Proxy, decisionResult.RuleName)
 	}
 
 	return &http.Client{
 		Timeout:   30 * time.Second,
-		Transport: &transport,
+		Transport: transport,
 	}, nil
+}
+
+type roundTripperWithContext struct {
+	base     *http.Transport
+	proxyURL string
+}
+
+func (rt *roundTripperWithContext) RoundTrip(req *http.Request) (*http.Response, error) {
+	ctx := context.WithValue(req.Context(), proxyURLContextKey, rt.proxyURL)
+	return rt.base.RoundTrip(req.WithContext(ctx))
 }
 
 func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
