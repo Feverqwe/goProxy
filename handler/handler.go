@@ -210,12 +210,10 @@ func (p *ProxyHandler) GetHTTPClient(targetURL string, config *config.ProxyConfi
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	parsedURL, err := url.Parse(targetURL)
+	parsedURL, decisionResult, err := p.decision.GetProxyForURL(targetURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse URL '%s': %v", targetURL, err)
+		return nil, fmt.Errorf("failed to get proxy decision: %v", err)
 	}
-
-	decisionResult := p.decision.GetProxyForURL(targetURL)
 	proxyURL := config.Proxies[decisionResult.Proxy]
 
 	isHTTPS := parsedURL.Scheme == "https"

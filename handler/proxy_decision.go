@@ -75,18 +75,13 @@ func (d *ProxyDecision) matchesURLPattern(pattern, url string) bool {
 func (d *ProxyDecision) GetProxyForRequest(r *http.Request) ProxyDecisionResult {
 	host := r.URL.Hostname()
 	fullURL := r.URL.String()
-	return d.getProxyDecision(r, host, fullURL)
+	return d.getProxyDecision(host, fullURL)
 }
 
-func (d *ProxyDecision) GetProxyForURL(urlStr string) ProxyDecisionResult {
-	parsedURL, err := url.Parse(urlStr)
+func (d *ProxyDecision) GetProxyForURL(urlStr string) (parsedURL *url.URL, decision ProxyDecisionResult, err error) {
+	parsedURL, err = url.Parse(urlStr)
 	if err != nil {
-		logger.Warn("Failed to parse URL '%s': %v", urlStr, err)
-		return ProxyDecisionResult{
-			Proxy:     d.config.DefaultProxy,
-			RuleName:  "default",
-			MatchType: "default",
-		}
+		return
 	}
 
 	if parsedURL.Scheme == "" {
@@ -96,15 +91,11 @@ func (d *ProxyDecision) GetProxyForURL(urlStr string) ProxyDecisionResult {
 	host := parsedURL.Hostname()
 	fullURL := parsedURL.String()
 
-	// Create a mock request for rule evaluation
-	req := &http.Request{
-		URL: parsedURL,
-	}
-
-	return d.getProxyDecision(req, host, fullURL)
+	decision = d.getProxyDecision(host, fullURL)
+	return
 }
 
-func (d *ProxyDecision) getProxyDecision(r *http.Request, host, fullURL string) ProxyDecisionResult {
+func (d *ProxyDecision) getProxyDecision(host, fullURL string) ProxyDecisionResult {
 	if result, exists := d.urlCache.Get(fullURL); exists {
 		if d.config.ShouldLog(logger.LogLevelDebug) {
 			logger.Debug("URL cache hit for %s: proxy=%s, rule=%s", fullURL, result.Proxy, result.RuleName)
@@ -126,7 +117,7 @@ func (d *ProxyDecision) getProxyDecision(r *http.Request, host, fullURL string) 
 		return result
 	}
 
-	result := d.evaluateRules(r, host, fullURL)
+	result := d.evaluateRules(host, fullURL)
 
 	switch result.MatchType {
 	case "url":
@@ -140,7 +131,7 @@ func (d *ProxyDecision) getProxyDecision(r *http.Request, host, fullURL string) 
 	return result
 }
 
-func (d *ProxyDecision) evaluateRules(r *http.Request, host, fullURL string) ProxyDecisionResult {
+func (d *ProxyDecision) evaluateRules(host, fullURL string) ProxyDecisionResult {
 	for _, rule := range d.config.Rules {
 		matchesRule := false
 		matchType := ""
