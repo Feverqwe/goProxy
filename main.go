@@ -6,18 +6,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
-	"time"
 
 	"goProxy/cache"
 	"goProxy/config"
 	"goProxy/handler"
 	"goProxy/logger"
+	"goProxy/ticker"
 	"goProxy/tray"
-
-	"github.com/skratchdot/open-golang/open"
 )
 
 func main() {
@@ -73,53 +70,7 @@ func main() {
 		currentServer = newServer
 	}
 
-	reloadTickerChan := make(chan struct{}, 1)
-
-	var reloadTicker *time.Ticker
-	var tickerStopChan chan struct{}
-	var tickerMutex sync.Mutex
-
-	stopOldTicker := func() {
-		tickerMutex.Lock()
-		defer tickerMutex.Unlock()
-		if tickerStopChan != nil {
-			close(tickerStopChan)
-			tickerStopChan = nil
-		}
-		if reloadTicker != nil {
-			reloadTicker.Stop()
-		}
-	}
-
-	startTicker := func(hours int) {
-		stopOldTicker()
-
-		if hours <= 0 {
-			return
-		}
-
-		tickerMutex.Lock()
-		tickerStopChan = make(chan struct{})
-		reloadTicker = time.NewTicker(time.Duration(hours) * time.Hour)
-		currentStopChan := tickerStopChan
-		currentTicker := reloadTicker
-		tickerMutex.Unlock()
-
-		go func() {
-			for {
-				select {
-				case <-currentTicker.C:
-					select {
-					case reloadTickerChan <- struct{}{}:
-					default:
-						// Если релоад уже в очереди, пропускаем
-					}
-				case <-currentStopChan:
-					return // Выход из горутины при остановке тикера
-				}
-			}
-		}()
-	}
+	tickerManager := ticker.NewTickerManager()
 
 	reloadConfiguration := func(trigger string) {
 		configMutex.Lock()
@@ -138,7 +89,7 @@ func main() {
 		currentConfig = newConfig
 
 		if newConfig.AutoReloadHours != prevAutoReloadHours {
-			startTicker(newConfig.AutoReloadHours)
+			tickerManager.StartTicker(newConfig.AutoReloadHours)
 		}
 
 		if newConfig.ListenAddr != prevListenAddr {
@@ -163,8 +114,8 @@ func main() {
 			case <-trayManager.GetReloadChan():
 				reloadConfiguration("Manual reload from tray")
 			case <-trayManager.GetOpenConfigChan():
-				openConfigDirectory(*configPath)
-			case <-reloadTickerChan:
+				config.OpenConfigDirectory(*configPath)
+			case <-tickerManager.GetReloadChan():
 				reloadConfiguration("Periodic update")
 			}
 		}
@@ -174,12 +125,12 @@ func main() {
 		startServer(currentConfig.ListenAddr)
 	}()
 
-	startTicker(currentConfig.AutoReloadHours)
+	tickerManager.StartTicker(currentConfig.AutoReloadHours)
 
 	go func() {
 		<-trayManager.GetQuitChan()
 
-		stopOldTicker()
+		tickerManager.StopOldTicker()
 
 		logger.Info("Shutting down proxy server...")
 		if err := currentServer.Close(); err != nil {
@@ -189,26 +140,4 @@ func main() {
 	}()
 
 	trayManager.Start()
-}
-
-func openConfigDirectory(configPath string) {
-	configDir := filepath.Dir(configPath)
-
-	if !filepath.IsAbs(configDir) {
-		absPath, err := filepath.Abs(configDir)
-		if err != nil {
-			logger.Error("Error getting absolute path for config directory: %v", err)
-			return
-		}
-		configDir = absPath
-	}
-
-	if err := os.MkdirAll(configDir, 0700); err != nil {
-		logger.Error("Error creating config directory: %v", err)
-		return
-	}
-
-	if err := open.Run(configDir); err != nil {
-		logger.Error("Error opening config directory: %v", err)
-	}
 }

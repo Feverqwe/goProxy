@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/skratchdot/open-golang/open"
 )
 
 func parseLogLevel(level string) int {
@@ -124,4 +126,26 @@ func loadExternalRules(source string, baseDir string, cacheOnly bool, httpClient
 	}
 
 	return string(content), nil
+}
+
+func OpenConfigDirectory(configPath string) {
+	configDir := filepath.Dir(configPath)
+
+	if !filepath.IsAbs(configDir) {
+		absPath, err := filepath.Abs(configDir)
+		if err != nil {
+			logger.Error("Error getting absolute path for config directory: %v", err)
+			return
+		}
+		configDir = absPath
+	}
+
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		logger.Error("Error creating config directory: %v", err)
+		return
+	}
+
+	if err := open.Run(configDir); err != nil {
+		logger.Error("Error opening config directory: %v", err)
+	}
 }
