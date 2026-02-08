@@ -1,5 +1,19 @@
 package config
 
+import "net/http"
+
+type HTTPClientFunc func(string, *ProxyConfig) (*http.Client, error)
+type HTTPClientNoConfigFunc func(string) (*http.Client, error)
+
+type Logger interface {
+	Debug(format string, v ...interface{})
+	Info(format string, v ...interface{})
+	Warn(format string, v ...interface{})
+	Error(format string, v ...interface{})
+	Printf(msg string, v ...interface{})
+	Close() error
+}
+
 type RuleBaseConfig struct {
 	Name          string `yaml:"name,omitempty"`
 	Ips           string `yaml:"ips,omitempty"`
@@ -33,11 +47,3 @@ type ProxyConfig struct {
 	AutoReloadHours int          `yaml:"autoReloadHours,omitempty"`
 	Rules           []RuleConfig `yaml:"rules"`
 }
-
-const (
-	LogLevelDebug = 4
-	LogLevelInfo  = 3
-	LogLevelWarn  = 2
-	LogLevelError = 1
-	LogLevelNone  = 0
-)

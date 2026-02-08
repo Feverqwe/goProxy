@@ -13,13 +13,15 @@ import (
 
 	"goProxy/config"
 	"goProxy/handler"
-	"goProxy/logging"
+	"goProxy/logger"
 	"goProxy/tray"
 
 	"github.com/skratchdot/open-golang/open"
 )
 
 func main() {
+	logger.InitDefaultLogger()
+
 	defaultConfigPath := config.GetConfigPath()
 	configPath := flag.String("config", defaultConfigPath, "Path to configuration file")
 	versionFlag := flag.Bool("version", false, "Display version information")
@@ -37,7 +39,6 @@ func main() {
 	}
 
 	currentConfig := configManager.GetConfig()
-	logger := logging.NewLogger(currentConfig)
 
 	proxyHandler := handler.NewProxyHandler(configManager)
 
@@ -148,10 +149,10 @@ func main() {
 			case <-trayManager.GetReloadChan():
 				reloadConfiguration("Manual reload from tray")
 			case <-trayManager.GetOpenConfigChan():
-				openConfigDirectory(*configPath, logger)
+				openConfigDirectory(*configPath)
 			case <-reloadTickerChan:
 				logger.Info("Periodic reload: update external rules")
-				configManager.RefreshExternalRules()
+				configManager.RefreshExternalRules(proxyHandler.GetHTTPClient)
 			}
 		}
 	}()
@@ -165,7 +166,7 @@ func main() {
 
 	go func() {
 		time.Sleep(2 * time.Second)
-		configManager.RefreshExternalRules()
+		configManager.RefreshExternalRules(proxyHandler.GetHTTPClient)
 	}()
 
 	startTicker(currentConfig.AutoReloadHours)
@@ -186,7 +187,7 @@ func main() {
 	logger.Info("Proxy server stopped")
 }
 
-func openConfigDirectory(configPath string, logger *logging.Logger) {
+func openConfigDirectory(configPath string) {
 	configDir := filepath.Dir(configPath)
 
 	if !filepath.IsAbs(configDir) {

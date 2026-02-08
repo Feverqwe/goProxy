@@ -3,9 +3,9 @@ package config
 import (
 	"crypto/sha256"
 	"fmt"
+	"goProxy/logger"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -34,11 +34,7 @@ func getCacheFilePath(url string) string {
 	return filepath.Join(getCacheDir(), filename)
 }
 
-func downloadAndCacheFile(downloadURL string, config *ProxyConfig) (string, error) {
-	return downloadAndCacheFileWithMode(downloadURL, false, config)
-}
-
-func downloadAndCacheFileWithMode(downloadURL string, cacheOnly bool, config *ProxyConfig) (string, error) {
+func downloadAndCacheFile(downloadURL string, cacheOnly bool, httpClientFunc HTTPClientNoConfigFunc) (string, error) {
 	cacheFile := getCacheFilePath(downloadURL)
 
 	if cacheOnly {
@@ -48,33 +44,43 @@ func downloadAndCacheFileWithMode(downloadURL string, cacheOnly bool, config *Pr
 		return "", fmt.Errorf("cached file not found for %s", downloadURL)
 	}
 
-	proxyURLStr := config.GetProxyServerURL()
-	proxyURL, err := url.Parse(proxyURLStr)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse proxy URL: %v", err)
+	var client *http.Client
+	if httpClientFunc != nil {
+		var err error
+		client, err = httpClientFunc(downloadURL)
+		if err != nil {
+			if _, cacheErr := os.Stat(cacheFile); cacheErr == nil {
+				logger.Warn("Failed to create HTTP client for %s: %v, using cached file", downloadURL, err)
+				return cacheFile, nil
+			}
+			return "", fmt.Errorf("failed to create HTTP client for %s: %v", downloadURL, err)
+		}
+	} else {
+		client = &http.Client{
+			Timeout: 30 * time.Second,
+		}
 	}
 
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-		},
-	}
+	return downloadWithClient(downloadURL, cacheFile, client)
+}
 
+func downloadWithClient(downloadURL, cacheFile string, client *http.Client) (string, error) {
 	resp, err := client.Get(downloadURL)
 	if err != nil {
 		if _, cacheErr := os.Stat(cacheFile); cacheErr == nil {
+			logger.Warn("Failed to download %s: %v, using cached file", downloadURL, err)
 			return cacheFile, nil
 		}
-		return "", fmt.Errorf("failed to download %s via proxy: %v", downloadURL, err)
+		return "", fmt.Errorf("failed to download %s: %v", downloadURL, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		if _, cacheErr := os.Stat(cacheFile); cacheErr == nil {
+			logger.Warn("Failed to download %s: status %d, using cached file", downloadURL, resp.StatusCode)
 			return cacheFile, nil
 		}
-		return "", fmt.Errorf("failed to download %s via proxy: status %d", downloadURL, resp.StatusCode)
+		return "", fmt.Errorf("failed to download %s: status %d", downloadURL, resp.StatusCode)
 	}
 
 	file, err := os.Create(cacheFile)

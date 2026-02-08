@@ -58,7 +58,6 @@ func LoadConfig(configPath string) (*ProxyConfig, error) {
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-
 		if err := saveDefaultConfig(configPath, config); err != nil {
 			return nil, fmt.Errorf("error creating default config file: %v", err)
 		}
@@ -80,7 +79,7 @@ func LoadConfig(configPath string) (*ProxyConfig, error) {
 	config.logLevelInt = parseLogLevel(config.LogLevel)
 
 	configDir := filepath.Dir(configPath)
-	config.preParseRuleListsWithMode(configDir, true)
+	config.preParseRuleLists(configDir, true, nil)
 
 	return config, nil
 }

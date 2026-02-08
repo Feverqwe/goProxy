@@ -1,6 +1,7 @@
 package config
 
 import (
+	"goProxy/logger"
 	"path/filepath"
 	"sync"
 )
@@ -16,6 +17,9 @@ func NewConfigManager(configPath string) (*ConfigManager, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	logger.ReconfigureGlobalLogger(config)
+
 	return &ConfigManager{
 		config:     config,
 		configPath: configPath,
@@ -38,13 +42,16 @@ func (cm *ConfigManager) ReloadConfig() error {
 	}
 
 	cm.config = newConfig
+
+	logger.ReconfigureGlobalLogger(newConfig)
+
 	return nil
 }
 
-func (cm *ConfigManager) RefreshExternalRules() {
+func (cm *ConfigManager) RefreshExternalRules(httpClientFunc HTTPClientFunc) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
 	configDir := filepath.Dir(cm.configPath)
-	cm.config.RefreshExternalRules(configDir)
+	cm.config.RefreshExternalRules(configDir, httpClientFunc)
 }

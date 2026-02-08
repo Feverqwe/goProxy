@@ -10,13 +10,14 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/elazarl/goproxy"
 	"golang.org/x/net/proxy"
 
 	"goProxy/cache"
 	"goProxy/config"
-	"goProxy/logging"
+	"goProxy/logger"
 )
 
 type contextKey string
@@ -25,7 +26,6 @@ const proxyURLContextKey contextKey = "proxyURL"
 
 type ProxyHandler struct {
 	configManager *config.ConfigManager
-	logger        *logging.Logger
 	cache         *cache.CacheManager
 	decision      *ProxyDecision
 	proxyServer   *goproxy.ProxyHttpServer
@@ -34,7 +34,6 @@ type ProxyHandler struct {
 
 func NewProxyHandler(configManager *config.ConfigManager) *ProxyHandler {
 	config := configManager.GetConfig()
-	logger := logging.NewLogger(config)
 
 	cacheManager := cache.NewCacheManager()
 
@@ -45,12 +44,11 @@ func NewProxyHandler(configManager *config.ConfigManager) *ProxyHandler {
 	proxyServer := goproxy.NewProxyHttpServer()
 	proxyServer.Verbose = false
 
-	goproxyLogger := logging.NewGoproxyLoggerAdapter(logger)
+	goproxyLogger := logger.NewGoproxyLoggerAdapter(logger.GetLogger())
 	proxyServer.Logger = goproxyLogger
 
 	handler := &ProxyHandler{
 		configManager: configManager,
-		logger:        logger,
 		cache:         cacheManager,
 		decision:      decision,
 		proxyServer:   proxyServer,
@@ -71,17 +69,11 @@ func (p *ProxyHandler) UpdateConfig(configManager *config.ConfigManager) {
 	p.configManager = configManager
 	config := configManager.GetConfig()
 
-	if err := p.logger.Close(); err != nil {
-		p.logger.Error("Close logger error", err)
-	} else {
-		p.logger = logging.NewLogger(config)
-	}
-
 	p.cache.PrecompilePatterns(config.GetAllHosts(), config.GetAllURLs(), config.GetAllIps())
 
 	p.decision = NewProxyDecision(config, p.cache)
 
-	goproxyLogger := logging.NewGoproxyLoggerAdapter(p.logger)
+	goproxyLogger := logger.NewGoproxyLoggerAdapter(logger.GetLogger())
 	p.proxyServer.Logger = goproxyLogger
 }
 
@@ -169,7 +161,7 @@ func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isH
 
 	proxyURL, exists := config.Proxies[decisionResult.Proxy]
 	if !exists {
-		p.logger.Error("Proxy key '%s' not found in proxies map", decisionResult.Proxy)
+		logger.Error("Proxy key '%s' not found in proxies map", decisionResult.Proxy)
 		http.Error(w, "Proxy configuration error", http.StatusInternalServerError)
 		return
 	}
@@ -179,7 +171,7 @@ func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isH
 		if isHTTPS {
 			target = r.Host
 		}
-		p.logger.Info("Blocking %s request to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
+		logger.Info("Blocking %s request to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
 		http.Error(w, "Request blocked by proxy configuration", http.StatusForbidden)
 		return
 	}
@@ -189,9 +181,9 @@ func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isH
 		target = r.Host
 	}
 	if proxyURL == "" {
-		p.logger.Info("Direct %s to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
+		logger.Info("Direct %s to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
 	} else {
-		p.logger.Info("%s to %s via proxy %s (rule: '%s')", capitalize(getRequestType(isHTTPS)), target, decisionResult.Proxy, decisionResult.RuleName)
+		logger.Info("%s to %s via proxy %s (rule: '%s')", capitalize(getRequestType(isHTTPS)), target, decisionResult.Proxy, decisionResult.RuleName)
 	}
 
 	ctx := context.WithValue(r.Context(), proxyURLContextKey, proxyURL)
@@ -214,8 +206,47 @@ func capitalize(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
+func (p *ProxyHandler) GetHTTPClient(targetURL string, config *config.ProxyConfig) (*http.Client, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	parsedURL, err := url.Parse(targetURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse URL '%s': %v", targetURL, err)
+	}
+
+	decisionResult := p.decision.GetProxyForURL(targetURL)
+	proxyURL := config.Proxies[decisionResult.Proxy]
+
+	isHTTPS := parsedURL.Scheme == "https"
+	target := parsedURL.Host
+
+	if proxyURL == "#" {
+		return nil, fmt.Errorf("request blocked by proxy configuration")
+	}
+
+	var transport *http.Transport
+
+	if proxyURL == "" {
+		logger.Info("Direct %s to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
+	} else {
+		transport = &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				ctx = context.WithValue(ctx, proxyURLContextKey, proxyURL)
+				return p.dialContext(ctx, network, addr)
+			},
+		}
+		logger.Info("%s to %s via proxy %s (rule: '%s')", capitalize(getRequestType(isHTTPS)), target, decisionResult.Proxy, decisionResult.RuleName)
+	}
+
+	return &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: transport,
+	}, nil
+}
+
 func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	p.logger.Debug("%s %s %s", r.Method, r.URL.String(), r.RemoteAddr)
+	logger.Debug("%s %s %s", r.Method, r.URL.String(), r.RemoteAddr)
 
 	isHTTPS := r.Method == http.MethodConnect
 

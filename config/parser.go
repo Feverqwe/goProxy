@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"goProxy/logger"
+	"net/http"
 	"strings"
 	"sync"
 
@@ -50,18 +52,18 @@ func ParseStringToList(input string, expandWildcardDomains bool) []string {
 	return result
 }
 
-func (c *ProxyConfig) preParseRuleLists(configDir string) {
-	c.preParseRuleListsWithMode(configDir, false)
-}
+func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc) {
+	getHttpClient := func(targetUrl string) (*http.Client, error) {
+		return httpClientFunc(targetUrl, c)
+	}
 
-func (c *ProxyConfig) preParseRuleListsWithMode(configDir string, cacheOnly bool) {
 	for i := range c.Rules {
 		rule := &c.Rules[i]
 
 		if rule.ExternalRule != "" {
-			externalRule, err := c.loadExternalRuleFileWithMode(rule.ExternalRule, configDir, cacheOnly)
+			externalRule, err := c.loadExternalRuleFile(rule.ExternalRule, configDir, cacheOnly, getHttpClient)
 			if err != nil {
-				fmt.Printf("Warning: Failed to load external rule file from %s: %v\n", rule.ExternalRule, err)
+				logger.Warn("Failed to load external rule file from %s: %v", rule.ExternalRule, err)
 			} else {
 				c.mergeRuleFields(rule, externalRule)
 			}
@@ -95,7 +97,7 @@ func (c *ProxyConfig) preParseRuleListsWithMode(configDir string, cacheOnly bool
 				wg.Add(1)
 				go func(source string, expandWildcards bool, result *[]string) {
 					defer wg.Done()
-					rules := c.loadExternalRuleListWithMode(source, expandWildcards, configDir, cacheOnly)
+					rules := c.loadExternalRuleList(source, expandWildcards, configDir, cacheOnly, getHttpClient)
 					mu.Lock()
 					*result = append(*result, rules...)
 					mu.Unlock()
@@ -107,8 +109,8 @@ func (c *ProxyConfig) preParseRuleListsWithMode(configDir string, cacheOnly bool
 	}
 }
 
-func (c *ProxyConfig) RefreshExternalRules(configDir string) {
-	c.preParseRuleListsWithMode(configDir, false)
+func (c *ProxyConfig) RefreshExternalRules(configDir string, httpClientFunc HTTPClientFunc) {
+	c.preParseRuleLists(configDir, false, httpClientFunc)
 }
 
 func (c *ProxyConfig) mergeRuleFields(mainRule *RuleConfig, externalRule *RuleBaseConfig) {
@@ -128,16 +130,12 @@ func (c *ProxyConfig) mergeRuleFields(mainRule *RuleConfig, externalRule *RuleBa
 	mainRule.ExternalURLs = strings.TrimSpace(mainRule.ExternalURLs + "\n" + externalRule.ExternalURLs)
 }
 
-func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string) (*RuleBaseConfig, error) {
-	return c.loadExternalRuleFileWithMode(source, configDir, false)
-}
-
-func (c *ProxyConfig) loadExternalRuleFileWithMode(source string, configDir string, cacheOnly bool) (*RuleBaseConfig, error) {
+func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string, cacheOnly bool, httpClientFunc HTTPClientNoConfigFunc) (*RuleBaseConfig, error) {
 	if source == "" {
 		return &RuleBaseConfig{}, nil
 	}
 
-	content, err := loadExternalRulesRelativeToWithMode(source, configDir, cacheOnly, c)
+	content, err := loadExternalRules(source, configDir, cacheOnly, httpClientFunc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load external rule file: %v", err)
 	}
@@ -150,18 +148,14 @@ func (c *ProxyConfig) loadExternalRuleFileWithMode(source string, configDir stri
 	return &externalRule, nil
 }
 
-func (c *ProxyConfig) loadExternalRuleList(url string, expandWildcardDomains bool, configDir string) []string {
-	return c.loadExternalRuleListWithMode(url, expandWildcardDomains, configDir, false)
-}
-
-func (c *ProxyConfig) loadExternalRuleListWithMode(url string, expandWildcardDomains bool, configDir string, cacheOnly bool) []string {
+func (c *ProxyConfig) loadExternalRuleList(url string, expandWildcardDomains bool, configDir string, cacheOnly bool, httpClientFunc HTTPClientNoConfigFunc) []string {
 	if url == "" {
 		return []string{}
 	}
 
-	rulesContent, err := loadExternalRulesRelativeToWithMode(url, configDir, cacheOnly, c)
+	rulesContent, err := loadExternalRules(url, configDir, cacheOnly, httpClientFunc)
 	if err != nil {
-		fmt.Printf("Warning: Failed to load external rules from %s: %v\n", url, err)
+		logger.Warn("Failed to load external rules from %s: %v", url, err)
 		return []string{}
 	}
 

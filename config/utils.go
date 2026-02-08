@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"goProxy/logger"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,17 +11,17 @@ import (
 func parseLogLevel(level string) int {
 	switch strings.ToLower(level) {
 	case "debug":
-		return LogLevelDebug
+		return logger.LogLevelDebug
 	case "info":
-		return LogLevelInfo
+		return logger.LogLevelInfo
 	case "warn":
-		return LogLevelWarn
+		return logger.LogLevelWarn
 	case "error":
-		return LogLevelError
+		return logger.LogLevelError
 	case "none":
-		return LogLevelNone
+		return logger.LogLevelNone
 	default:
-		return LogLevelInfo
+		return logger.LogLevelInfo
 	}
 }
 
@@ -103,16 +104,12 @@ func (c *ProxyConfig) GetProxyServerURL() string {
 	return "http://" + c.ListenAddr
 }
 
-func loadExternalRulesRelativeTo(source string, baseDir string, config *ProxyConfig) (string, error) {
-	return loadExternalRulesRelativeToWithMode(source, baseDir, false, config)
-}
-
-func loadExternalRulesRelativeToWithMode(source string, baseDir string, cacheOnly bool, config *ProxyConfig) (string, error) {
+func loadExternalRules(source string, baseDir string, cacheOnly bool, httpClientFunc HTTPClientNoConfigFunc) (string, error) {
 	var filePath string
 	var err error
 
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
-		filePath, err = downloadAndCacheFileWithMode(source, cacheOnly, config)
+		filePath, err = downloadAndCacheFile(source, cacheOnly, httpClientFunc)
 		if err != nil {
 			return "", err
 		}
