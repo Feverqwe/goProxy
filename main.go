@@ -111,10 +111,6 @@ func main() {
 		}
 	}
 
-	refreshExternalRules := func() {
-		currentConfig.RefreshExternalRules(proxyHandler.GetHTTPClient)
-	}
-
 	reloadConfiguration := func(trigger string) {
 		logger.Info("%s: reloading configuration...", trigger)
 		newConfig, err := currentConfig.ReloadConfig()
@@ -157,8 +153,7 @@ func main() {
 			case <-trayManager.GetOpenConfigChan():
 				openConfigDirectory(*configPath)
 			case <-reloadTickerChan:
-				logger.Info("Periodic reload: update external rules")
-				refreshExternalRules()
+				reloadConfiguration("Periodic update")
 			}
 		}
 	}()
@@ -168,10 +163,6 @@ func main() {
 			logger.Error("Server error: %v", err)
 			panic(err)
 		}
-	}()
-
-	go func() {
-		refreshExternalRules()
 	}()
 
 	startTicker(currentConfig.AutoReloadHours)

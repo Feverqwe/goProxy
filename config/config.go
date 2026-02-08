@@ -85,10 +85,6 @@ func LoadConfig(configPath string, cacheManager *cache.CacheManager, cacheOnly b
 	return config, nil
 }
 
-func (c *ProxyConfig) RefreshExternalRules(httpClientFunc HTTPClientFunc) {
-	c.afterLoad(httpClientFunc)
-}
-
 func (c *ProxyConfig) afterLoad(httpClientFunc HTTPClientFunc) {
 	configDir := filepath.Dir(c.configPath)
 
