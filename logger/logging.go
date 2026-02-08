@@ -120,7 +120,7 @@ func InitDefaultLogger() {
 }
 
 func ReconfigureGlobalLogger(config ConfigProvider) {
-	if globalLogger != nil {
+	if globalLogger == nil {
 		loggerMutex.Lock()
 		globalLogger = NewLogger(config)
 		loggerMutex.Unlock()
