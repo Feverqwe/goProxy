@@ -3,7 +3,7 @@ package config
 import (
 	"crypto/sha256"
 	"fmt"
-	"goProxy/logger"
+	"goProxy/logging"
 	"io"
 	"net/http"
 	"os"
@@ -34,7 +34,7 @@ func getCacheFilePath(url string) string {
 	return filepath.Join(getCacheDir(), filename)
 }
 
-func downloadAndCacheFile(downloadURL string, cacheOnly bool, httpClientFunc HTTPClientFunc) (string, error) {
+func downloadAndCacheFile(downloadURL string, cacheOnly bool, httpClientFunc HTTPClientFunc, logger *logging.Logger) (string, error) {
 	cacheFile := getCacheFilePath(downloadURL)
 
 	if cacheOnly {
@@ -61,10 +61,10 @@ func downloadAndCacheFile(downloadURL string, cacheOnly bool, httpClientFunc HTT
 		}
 	}
 
-	return downloadWithClient(downloadURL, cacheFile, client)
+	return downloadWithClient(downloadURL, cacheFile, client, logger)
 }
 
-func downloadWithClient(downloadURL, cacheFile string, client *http.Client) (string, error) {
+func downloadWithClient(downloadURL, cacheFile string, client *http.Client, logger *logging.Logger) (string, error) {
 	resp, err := client.Get(downloadURL)
 	if err != nil {
 		if _, cacheErr := os.Stat(cacheFile); cacheErr == nil {

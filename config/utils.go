@@ -2,7 +2,7 @@ package config
 
 import (
 	"fmt"
-	"goProxy/logger"
+	"goProxy/logging"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,22 +13,18 @@ import (
 func parseLogLevel(level string) int {
 	switch strings.ToLower(level) {
 	case "debug":
-		return logger.LogLevelDebug
+		return logging.LogLevelDebug
 	case "info":
-		return logger.LogLevelInfo
+		return logging.LogLevelInfo
 	case "warn":
-		return logger.LogLevelWarn
+		return logging.LogLevelWarn
 	case "error":
-		return logger.LogLevelError
+		return logging.LogLevelError
 	case "none":
-		return logger.LogLevelNone
+		return logging.LogLevelNone
 	default:
-		return logger.LogLevelInfo
+		return logging.LogLevelInfo
 	}
-}
-
-func (c *ProxyConfig) ShouldLog(level int) bool {
-	return level <= c.logLevelInt
 }
 
 func (c *ProxyConfig) GetAllIps() []string {
@@ -94,12 +90,12 @@ func (c *ProxyConfig) GetMaxLogFiles() int {
 	return c.MaxLogFiles
 }
 
-func loadExternalRules(source string, baseDir string, cacheOnly bool, httpClientFunc HTTPClientFunc) (string, error) {
+func loadExternalRules(source string, baseDir string, cacheOnly bool, httpClientFunc HTTPClientFunc, logger *logging.Logger) (string, error) {
 	var filePath string
 	var err error
 
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
-		filePath, err = downloadAndCacheFile(source, cacheOnly, httpClientFunc)
+		filePath, err = downloadAndCacheFile(source, cacheOnly, httpClientFunc, logger)
 		if err != nil {
 			return "", err
 		}
@@ -128,7 +124,7 @@ func loadExternalRules(source string, baseDir string, cacheOnly bool, httpClient
 	return string(content), nil
 }
 
-func OpenConfigDirectory(configPath string) {
+func OpenConfigDirectory(configPath string, logger *logging.Logger) {
 	configDir := filepath.Dir(configPath)
 
 	if !filepath.IsAbs(configDir) {

@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"goProxy/logger"
 	"strings"
 	"sync"
 
@@ -60,7 +59,7 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 			var err error
 			externalRule, err = c.loadExternalRuleFile(rule.ExternalRule, configDir, cacheOnly, httpClientFunc)
 			if err != nil {
-				logger.Warn("Failed to load external rule file from %s: %v", rule.ExternalRule, err)
+				c.logger.Warn("Failed to load external rule file from %s: %v", rule.ExternalRule, err)
 			}
 		}
 
@@ -117,7 +116,7 @@ func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string, cach
 		return &RuleBaseConfig{}, nil
 	}
 
-	content, err := loadExternalRules(source, configDir, cacheOnly, httpClientFunc)
+	content, err := loadExternalRules(source, configDir, cacheOnly, httpClientFunc, c.logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load external rule file: %v", err)
 	}
@@ -135,9 +134,9 @@ func (c *ProxyConfig) loadExternalRuleList(url string, expandWildcardDomains boo
 		return []string{}
 	}
 
-	rulesContent, err := loadExternalRules(url, configDir, cacheOnly, httpClientFunc)
+	rulesContent, err := loadExternalRules(url, configDir, cacheOnly, httpClientFunc, c.logger)
 	if err != nil {
-		logger.Warn("Failed to load external rules from %s: %v", url, err)
+		c.logger.Warn("Failed to load external rules from %s: %v", url, err)
 		return []string{}
 	}
 

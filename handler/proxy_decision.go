@@ -8,7 +8,7 @@ import (
 
 	"goProxy/cache"
 	"goProxy/config"
-	"goProxy/logger"
+	"goProxy/logging"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	explru "github.com/hashicorp/golang-lru/v2/expirable"
@@ -26,9 +26,10 @@ type ProxyDecision struct {
 	hostCache *lru.Cache[string, ProxyDecisionResult]
 	urlCache  *lru.Cache[string, ProxyDecisionResult]
 	ipCache   *explru.LRU[string, ProxyDecisionResult]
+	logger    *logging.Logger
 }
 
-func NewProxyDecision(config *config.ProxyConfig, cacheManager *cache.CacheManager) *ProxyDecision {
+func NewProxyDecision(config *config.ProxyConfig, cacheManager *cache.CacheManager, logger *logging.Logger) *ProxyDecision {
 	hostCache, _ := lru.New[string, ProxyDecisionResult](1000)
 	urlCache, _ := lru.New[string, ProxyDecisionResult](1000)
 	ipCache := explru.NewLRU[string, ProxyDecisionResult](1000, nil, cache.IPResolutionTTL)
@@ -39,6 +40,7 @@ func NewProxyDecision(config *config.ProxyConfig, cacheManager *cache.CacheManag
 		hostCache: hostCache,
 		urlCache:  urlCache,
 		ipCache:   ipCache,
+		logger:    logger,
 	}
 }
 
@@ -105,23 +107,17 @@ func (d *ProxyDecision) GetProxyForURL(urlStr string) (proxyURL string, parsedUR
 
 func (d *ProxyDecision) getProxyDecision(host, fullURL string) ProxyDecisionResult {
 	if result, exists := d.urlCache.Get(fullURL); exists {
-		if d.config.ShouldLog(logger.LogLevelDebug) {
-			logger.Debug("URL cache hit for %s: proxy=%s, rule=%s", fullURL, result.Proxy, result.RuleName)
-		}
+		d.logger.Debug("URL cache hit for %s: proxy=%s, rule=%s", fullURL, result.Proxy, result.RuleName)
 		return result
 	}
 
 	if result, exists := d.hostCache.Get(host); exists {
-		if d.config.ShouldLog(logger.LogLevelDebug) {
-			logger.Debug("Host cache hit for %s: proxy=%s, rule=%s", host, result.Proxy, result.RuleName)
-		}
+		d.logger.Debug("Host cache hit for %s: proxy=%s, rule=%s", host, result.Proxy, result.RuleName)
 		return result
 	}
 
 	if result, exists := d.ipCache.Get(host); exists {
-		if d.config.ShouldLog(logger.LogLevelDebug) {
-			logger.Debug("IP cache hit for %s: proxy=%s, rule=%s", host, result.Proxy, result.RuleName)
-		}
+		d.logger.Debug("IP cache hit for %s: proxy=%s, rule=%s", host, result.Proxy, result.RuleName)
 		return result
 	}
 
@@ -178,9 +174,7 @@ func (d *ProxyDecision) evaluateRules(host, fullURL string) ProxyDecisionResult 
 				ips, err := d.cache.ResolveHost(host)
 				if err == nil {
 					targetIPs = ips
-					if d.config.ShouldLog(logger.LogLevelDebug) {
-						logger.Debug("Resolved target host %s to %v", host, ips)
-					}
+					d.logger.Debug("Resolved target host %s to %v", host, ips)
 				}
 			}
 
@@ -190,27 +184,21 @@ func (d *ProxyDecision) evaluateRules(host, fullURL string) ProxyDecisionResult 
 					if err == nil {
 						for _, tip := range targetIPs {
 							if ipNet.Contains(tip) {
-								if d.config.ShouldLog(logger.LogLevelDebug) {
-									logger.Debug("Match: target %s (IP: %s) fits CIDR rule %s", host, tip, ipRule)
-								}
+								d.logger.Debug("Match: target %s (IP: %s) fits CIDR rule %s", host, tip, ipRule)
 								matchesRule = true
 								matchType = "ip"
 								break
 							}
 						}
 					} else {
-						if d.config.ShouldLog(logger.LogLevelDebug) {
-							logger.Debug("Rule '%s' is not a CIDR, attempting DNS resolve", ipRule)
-						}
+						d.logger.Debug("Rule '%s' is not a CIDR, attempting DNS resolve", ipRule)
 
 						ruleIPs, err := d.cache.ResolveHost(ipRule)
 						if err == nil {
 							for _, rip := range ruleIPs {
 								for _, tip := range targetIPs {
 									if rip.Equal(tip) {
-										if d.config.ShouldLog(logger.LogLevelDebug) {
-											logger.Debug("Match: target %s (IP: %s) matches IP %s from rule domain %s", host, tip, rip, ipRule)
-										}
+										d.logger.Debug("Match: target %s (IP: %s) matches IP %s from rule domain %s", host, tip, rip, ipRule)
 										matchesRule = true
 										matchType = "ip"
 										break
@@ -220,8 +208,8 @@ func (d *ProxyDecision) evaluateRules(host, fullURL string) ProxyDecisionResult 
 									break
 								}
 							}
-						} else if d.config.ShouldLog(logger.LogLevelDebug) {
-							logger.Debug("Failed to resolve domain rule '%s': %v", ipRule, err)
+						} else {
+							d.logger.Debug("Failed to resolve domain rule '%s': %v", ipRule, err)
 						}
 					}
 					if matchesRule {

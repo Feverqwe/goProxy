@@ -3,14 +3,14 @@ package config
 import (
 	"fmt"
 	"goProxy/cache"
-	"goProxy/logger"
+	"goProxy/logging"
 	"os"
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
 
-func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientFunc HTTPClientFunc, cacheOnly bool) (*ProxyConfig, error) {
+func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientFunc HTTPClientFunc, cacheOnly bool, logger *logging.Logger) (*ProxyConfig, error) {
 	config := &ProxyConfig{
 		DefaultProxy: "direct",
 		Proxies: map[string]string{
@@ -59,6 +59,7 @@ func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientF
 		},
 		cache:      cacheManager,
 		configPath: configPath,
+		logger:     logger,
 	}
 
 	if _, err := os.Stat(configPath); err == nil {
@@ -84,7 +85,12 @@ func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientF
 
 func (c *ProxyConfig) afterLoad(httpClientFunc HTTPClientFunc, cacheOnly bool) {
 	c.logLevelInt = parseLogLevel(c.LogLevel)
-	logger.ReconfigureGlobalLogger(c)
+
+	if c.logger == nil {
+		c.logger = logging.NewLogger(c)
+	} else {
+		c.logger.Reconfigure(c)
+	}
 
 	configDir := filepath.Dir(c.configPath)
 
@@ -109,6 +115,14 @@ func saveDefaultConfig(configPath string, config *ProxyConfig) error {
 	return nil
 }
 
+func (c *ProxyConfig) GetLogger() *logging.Logger {
+	return c.logger
+}
+
+func (c *ProxyConfig) GetLogLevelInt() int {
+	return c.logLevelInt
+}
+
 func (c *ProxyConfig) ReloadConfig(httpClientFunc HTTPClientFunc) (*ProxyConfig, error) {
-	return LoadConfig(c.configPath, c.cache, httpClientFunc, false)
+	return LoadConfig(c.configPath, c.cache, httpClientFunc, false, c.logger)
 }

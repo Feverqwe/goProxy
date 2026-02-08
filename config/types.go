@@ -2,6 +2,7 @@ package config
 
 import (
 	"goProxy/cache"
+	"goProxy/logging"
 	"net/http"
 )
 
@@ -51,4 +52,5 @@ type ProxyConfig struct {
 	logLevelInt int
 	cache       *cache.CacheManager
 	configPath  string
+	logger      *logging.Logger
 }

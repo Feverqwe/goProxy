@@ -18,7 +18,7 @@ import (
 
 	"goProxy/cache"
 	"goProxy/config"
-	"goProxy/logger"
+	"goProxy/logging"
 )
 
 type contextKey string
@@ -37,21 +37,23 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 type ProxyHandler struct {
 	decision    *ProxyDecision
 	proxyServer *goproxy.ProxyHttpServer
+	logger      *logging.Logger
 	mu          sync.RWMutex
 }
 
-func NewProxyHandler(config *config.ProxyConfig, cacheManager *cache.CacheManager) *ProxyHandler {
-	decision := NewProxyDecision(config, cacheManager)
+func NewProxyHandler(config *config.ProxyConfig, cacheManager *cache.CacheManager, logger *logging.Logger) *ProxyHandler {
+	decision := NewProxyDecision(config, cacheManager, logger)
 
 	proxyServer := goproxy.NewProxyHttpServer()
 	proxyServer.Verbose = false
 
-	goproxyLogger := logger.NewGoproxyLoggerAdapter(logger.GetLogger())
+	goproxyLogger := logging.NewGoproxyLoggerAdapter(logger)
 	proxyServer.Logger = goproxyLogger
 
 	handler := &ProxyHandler{
 		decision:    decision,
 		proxyServer: proxyServer,
+		logger:      logger,
 	}
 
 	tr := http.DefaultTransport.(*http.Transport).Clone()
@@ -62,8 +64,8 @@ func NewProxyHandler(config *config.ProxyConfig, cacheManager *cache.CacheManage
 }
 
 func (p *ProxyHandler) UpdateConfig(config *config.ProxyConfig, cache *cache.CacheManager) {
-	goproxyLogger := logger.NewGoproxyLoggerAdapter(logger.GetLogger())
-	decision := NewProxyDecision(config, cache)
+	goproxyLogger := logging.NewGoproxyLoggerAdapter(p.logger)
+	decision := NewProxyDecision(config, cache, p.logger)
 
 	p.mu.Lock()
 	p.decision = decision
@@ -172,7 +174,7 @@ func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isH
 	proxyURL, decisionResult, err := currentDecision.GetProxyForRequest(r)
 
 	if err != nil {
-		logger.Error("Error getting proxy decision: %v", err)
+		p.logger.Error("Error getting proxy decision: %v", err)
 		http.Error(w, "Proxy configuration error", http.StatusInternalServerError)
 		return
 	}
@@ -182,7 +184,7 @@ func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isH
 		if isHTTPS {
 			target = r.Host
 		}
-		logger.Info("Blocking %s request to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
+		p.logger.Info("Blocking %s request to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
 		http.Error(w, "Request blocked by proxy configuration", http.StatusForbidden)
 		return
 	}
@@ -192,9 +194,9 @@ func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isH
 		target = r.Host
 	}
 	if proxyURL == "" {
-		logger.Info("Direct %s to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
+		p.logger.Info("Direct %s to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
 	} else {
-		logger.Info("%s to %s via proxy %s (rule: '%s')", capitalize(getRequestType(isHTTPS)), target, decisionResult.Proxy, decisionResult.RuleName)
+		p.logger.Info("%s to %s via proxy %s (rule: '%s')", capitalize(getRequestType(isHTTPS)), target, decisionResult.Proxy, decisionResult.RuleName)
 	}
 
 	ctx := context.WithValue(r.Context(), proxyURLContextKey, proxyURL)
@@ -239,13 +241,13 @@ func (p *ProxyHandler) GetHTTPClient(targetURL string) (*http.Client, error) {
 
 	if proxyURL == "" {
 		transport = http.DefaultTransport
-		logger.Info("Direct %s to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
+		p.logger.Info("Direct %s to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
 	} else {
 		transport = &roundTripperWithContext{
 			base:     p.proxyServer.Tr,
 			proxyURL: proxyURL,
 		}
-		logger.Info("%s to %s via proxy %s (rule: '%s')", capitalize(getRequestType(isHTTPS)), target, decisionResult.Proxy, decisionResult.RuleName)
+		p.logger.Info("%s to %s via proxy %s (rule: '%s')", capitalize(getRequestType(isHTTPS)), target, decisionResult.Proxy, decisionResult.RuleName)
 	}
 
 	return &http.Client{
@@ -265,7 +267,7 @@ func (rt *roundTripperWithContext) RoundTrip(req *http.Request) (*http.Response,
 }
 
 func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	logger.Debug("%s %s %s", r.Method, r.URL.String(), r.RemoteAddr)
+	p.logger.Debug("%s %s %s", r.Method, r.URL.String(), r.RemoteAddr)
 
 	isHTTPS := r.Method == http.MethodConnect
 

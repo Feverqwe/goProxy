@@ -1,4 +1,4 @@
-package logger
+package logging
 
 import (
 	"io"
@@ -10,15 +10,12 @@ import (
 )
 
 type FileLogger struct {
-	config     ConfigProvider
 	fileLogger *log.Logger
 	lumberjack *lumberjack.Logger
 }
 
 func NewFileLogger(config ConfigProvider) (*FileLogger, error) {
-	fl := &FileLogger{
-		config: config,
-	}
+	fl := &FileLogger{}
 
 	logFile := config.(interface{ GetAccessLogPath() string }).GetAccessLogPath()
 	maxSize := config.(interface{ GetMaxLogSize() int }).GetMaxLogSize()

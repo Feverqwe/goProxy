@@ -12,14 +12,11 @@ import (
 	"goProxy/cache"
 	"goProxy/config"
 	"goProxy/handler"
-	"goProxy/logger"
 	"goProxy/ticker"
 	"goProxy/tray"
 )
 
 func main() {
-	logger.InitDefaultLogger()
-
 	defaultConfigPath := config.GetConfigPath()
 	configPath := flag.String("config", defaultConfigPath, "Path to configuration file")
 	versionFlag := flag.Bool("version", false, "Display version information")
@@ -34,12 +31,13 @@ func main() {
 	cacheManager := cache.NewCacheManager()
 
 	configMutex := &sync.Mutex{}
-	currentConfig, err := config.LoadConfig(*configPath, cacheManager, nil, true)
+	currentConfig, err := config.LoadConfig(*configPath, cacheManager, nil, true, nil)
 	if err != nil {
 		panic(err)
 	}
 
-	proxyHandler := handler.NewProxyHandler(currentConfig, cacheManager)
+	logger := currentConfig.GetLogger()
+	proxyHandler := handler.NewProxyHandler(currentConfig, cacheManager, logger)
 
 	var currentServer *http.Server
 
@@ -114,7 +112,7 @@ func main() {
 			case <-trayManager.GetReloadChan():
 				reloadConfiguration("Manual reload from tray")
 			case <-trayManager.GetOpenConfigChan():
-				config.OpenConfigDirectory(*configPath)
+				config.OpenConfigDirectory(*configPath, logger)
 			case <-tickerManager.GetReloadChan():
 				reloadConfiguration("Periodic update")
 			}
