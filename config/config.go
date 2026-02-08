@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func LoadConfig(configPath string, cacheManager *cache.CacheManager, cacheOnly bool) (*ProxyConfig, error) {
+func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientFunc HTTPClientFunc, cacheOnly bool) (*ProxyConfig, error) {
 	config := &ProxyConfig{
 		DefaultProxy: "direct",
 		Proxies: map[string]string{
@@ -77,18 +77,18 @@ func LoadConfig(configPath string, cacheManager *cache.CacheManager, cacheOnly b
 		}
 	}
 
-	config.afterLoad(nil)
+	config.afterLoad(httpClientFunc, cacheOnly)
 
 	return config, nil
 }
 
-func (c *ProxyConfig) afterLoad(httpClientFunc HTTPClientFunc) {
+func (c *ProxyConfig) afterLoad(httpClientFunc HTTPClientFunc, cacheOnly bool) {
 	c.logLevelInt = parseLogLevel(c.LogLevel)
 	logger.ReconfigureGlobalLogger(c)
 
 	configDir := filepath.Dir(c.configPath)
 
-	c.preParseRuleLists(configDir, false, httpClientFunc)
+	c.preParseRuleLists(configDir, cacheOnly, httpClientFunc)
 
 	c.cache.PrecompilePatterns(c.GetAllHosts(), c.GetAllURLs(), c.GetAllIps())
 }
@@ -109,6 +109,6 @@ func saveDefaultConfig(configPath string, config *ProxyConfig) error {
 	return nil
 }
 
-func (c *ProxyConfig) ReloadConfig() (*ProxyConfig, error) {
-	return LoadConfig(c.configPath, c.cache, false)
+func (c *ProxyConfig) ReloadConfig(httpClientFunc HTTPClientFunc) (*ProxyConfig, error) {
+	return LoadConfig(c.configPath, c.cache, httpClientFunc, false)
 }

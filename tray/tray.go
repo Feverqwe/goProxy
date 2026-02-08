@@ -54,7 +54,6 @@ func (tm *TrayManager) onExit() {
 }
 
 func (tm *TrayManager) createMenu() {
-
 	systray.AddSeparator()
 	reloadItem := systray.AddMenuItem("Reload config", "Reload configuration file")
 	openConfigItem := systray.AddMenuItem("Open config directory", "Open directory containing config file")
@@ -64,7 +63,6 @@ func (tm *TrayManager) createMenu() {
 
 	go func() {
 		for range reloadItem.ClickedCh {
-
 			select {
 			case tm.reloadChan <- struct{}{}:
 			default:
@@ -75,7 +73,6 @@ func (tm *TrayManager) createMenu() {
 
 	go func() {
 		for range openConfigItem.ClickedCh {
-
 			select {
 			case tm.openConfigChan <- struct{}{}:
 			default:

@@ -37,34 +37,25 @@ func main() {
 	cacheManager := cache.NewCacheManager()
 
 	configMutex := &sync.Mutex{}
-	currentConfig, err := config.LoadConfig(*configPath, cacheManager, true)
+	currentConfig, err := config.LoadConfig(*configPath, cacheManager, nil, true)
 	if err != nil {
 		panic(err)
 	}
 
 	proxyHandler := handler.NewProxyHandler(currentConfig, cacheManager)
 
-	serverMutex := &sync.Mutex{}
-	currentServer := &http.Server{
-		Addr:    currentConfig.ListenAddr,
-		Handler: proxyHandler,
-	}
-
-	logger.Info("Starting proxy server on %s", currentConfig.ListenAddr)
+	var currentServer *http.Server
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGHUP, os.Interrupt, syscall.SIGTERM)
 
 	trayManager := tray.NewTrayManager()
 
-	restartServerIfAddressChanged := func(listenAddr string) {
-		serverMutex.Lock()
-		defer serverMutex.Unlock()
-
-		logger.Info("Listen address changed to '%s', restarting server...", listenAddr)
-
-		if err := currentServer.Close(); err != nil {
-			logger.Error("Error closing old server: %v", err)
+	startServer := func(listenAddr string) {
+		if currentServer != nil {
+			if err := currentServer.Close(); err != nil {
+				logger.Error("Error closing old server: %v", err)
+			}
 		}
 
 		newServer := &http.Server{
@@ -73,9 +64,9 @@ func main() {
 		}
 
 		go func() {
+			logger.Info("Starting proxy server on %s", listenAddr)
 			if err := newServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				logger.Error("New server error: %v", err)
-				panic(err)
+				logger.Error("Server error: %v", err)
 			}
 		}()
 
@@ -106,7 +97,7 @@ func main() {
 		defer configMutex.Unlock()
 
 		logger.Info("%s: reloading configuration...", trigger)
-		newConfig, err := currentConfig.ReloadConfig()
+		newConfig, err := currentConfig.ReloadConfig(proxyHandler.GetHTTPClient)
 		if err != nil {
 			logger.Error("Error reloading configuration: %v", err)
 			return
@@ -122,7 +113,7 @@ func main() {
 		}
 
 		if newConfig.ListenAddr != prevListenAddr {
-			restartServerIfAddressChanged(newConfig.ListenAddr)
+			startServer(newConfig.ListenAddr)
 		}
 
 		proxyHandler.UpdateConfig(currentConfig, cacheManager)
@@ -140,13 +131,6 @@ func main() {
 					trayManager.Exit()
 					return
 				}
-			case <-trayManager.GetQuitChan():
-				serverMutex.Lock()
-				if err := currentServer.Close(); err != nil {
-					logger.Error("Error closing server: %v", err)
-				}
-				serverMutex.Unlock()
-				return
 			case <-trayManager.GetReloadChan():
 				reloadConfiguration("Manual reload from tray")
 			case <-trayManager.GetOpenConfigChan():
@@ -158,28 +142,26 @@ func main() {
 	}()
 
 	go func() {
-		if err := currentServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("Server error: %v", err)
-			panic(err)
-		}
+		startServer(currentConfig.ListenAddr)
 	}()
 
 	startTicker(currentConfig.AutoReloadHours)
-	defer func() {
+
+	go func() {
+		<-trayManager.GetQuitChan()
+
 		if reloadTicker != nil {
 			reloadTicker.Stop()
 		}
+
+		logger.Info("Shutting down proxy server...")
+		if err := currentServer.Close(); err != nil {
+			logger.Error("Error closing server: %v", err)
+		}
+		logger.Info("Proxy server stopped")
 	}()
 
 	trayManager.Start()
-
-	logger.Info("Shutting down proxy server...")
-	serverMutex.Lock()
-	if err := currentServer.Close(); err != nil {
-		logger.Error("Error closing server: %v", err)
-	}
-	serverMutex.Unlock()
-	logger.Info("Proxy server stopped")
 }
 
 func openConfigDirectory(configPath string) {
