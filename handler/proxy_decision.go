@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -53,10 +54,16 @@ func (d *ProxyDecision) matchesURLPattern(pattern, url string) bool {
 	return g.Match(url)
 }
 
-func (d *ProxyDecision) GetProxyForRequest(r *http.Request) cache.ProxyDecisionResult {
+func (d *ProxyDecision) GetProxyForRequest(r *http.Request) (proxyURL string, decision cache.ProxyDecisionResult, err error) {
 	host := r.URL.Hostname()
 	fullURL := r.URL.String()
-	return d.getProxyDecision(host, fullURL)
+	decision = d.getProxyDecision(host, fullURL)
+	var exists bool
+	proxyURL, exists = d.config.Proxies[decision.Proxy]
+	if !exists {
+		err = fmt.Errorf("proxy key '%s' not found in proxies map", decision.Proxy)
+	}
+	return
 }
 
 func (d *ProxyDecision) GetProxyForURL(urlStr string) (proxyURL string, parsedURL *url.URL, decision cache.ProxyDecisionResult, err error) {

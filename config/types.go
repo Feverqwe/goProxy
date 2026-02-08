@@ -50,4 +50,5 @@ type ProxyConfig struct {
 
 	logLevelInt int
 	cache       *cache.CacheManager
+	configPath  string
 }

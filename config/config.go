@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"goProxy/cache"
+	"goProxy/logger"
 	"os"
 	"path/filepath"
 
@@ -56,35 +57,44 @@ func LoadConfig(configPath string, cacheManager *cache.CacheManager, cacheOnly b
 				Proxy: "block",
 			},
 		},
-		cache: cacheManager,
+		cache:      cacheManager,
+		configPath: configPath,
 	}
 
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+	if _, err := os.Stat(configPath); err == nil {
+		file, err := os.Open(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("error opening config file: %v", err)
+		}
+		defer file.Close()
+
+		if err := yaml.NewDecoder(file).Decode(config); err != nil {
+			return nil, fmt.Errorf("error parsing config file: %v", err)
+		}
+	} else {
 		if err := saveDefaultConfig(configPath, config); err != nil {
 			return nil, fmt.Errorf("error creating default config file: %v", err)
 		}
-
-		config.logLevelInt = parseLogLevel(config.LogLevel)
-		return config, nil
-	}
-
-	file, err := os.Open(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("error opening config file: %v", err)
-	}
-	defer file.Close()
-
-	if err := yaml.NewDecoder(file).Decode(config); err != nil {
-		return nil, fmt.Errorf("error parsing config file: %v", err)
 	}
 
 	config.logLevelInt = parseLogLevel(config.LogLevel)
+	logger.ReconfigureGlobalLogger(config)
 
-	configDir := filepath.Dir(configPath)
-
-	config.preParseRuleLists(configDir, cacheOnly, nil)
+	config.afterLoad(nil)
 
 	return config, nil
+}
+
+func (c *ProxyConfig) RefreshExternalRules(httpClientFunc HTTPClientFunc) {
+	c.afterLoad(httpClientFunc)
+}
+
+func (c *ProxyConfig) afterLoad(httpClientFunc HTTPClientFunc) {
+	configDir := filepath.Dir(c.configPath)
+
+	c.preParseRuleLists(configDir, false, httpClientFunc)
+
+	c.cache.PrecompilePatterns(c.GetAllHosts(), c.GetAllURLs(), c.GetAllIps())
 }
 
 func saveDefaultConfig(configPath string, config *ProxyConfig) error {
@@ -101,4 +111,8 @@ func saveDefaultConfig(configPath string, config *ProxyConfig) error {
 	}
 
 	return nil
+}
+
+func (c *ProxyConfig) ReloadConfig() (*ProxyConfig, error) {
+	return LoadConfig(c.configPath, c.cache, false)
 }

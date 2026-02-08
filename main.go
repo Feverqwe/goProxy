@@ -36,36 +36,33 @@ func main() {
 
 	cacheManager := cache.NewCacheManager()
 
-	configManager, err := config.NewConfigManager(*configPath, cacheManager)
+	currentConfig, err := config.LoadConfig(*configPath, cacheManager, true)
 	if err != nil {
 		panic(err)
 	}
 
-	currentConfig := configManager.GetConfig()
-
-	proxyHandler := handler.NewProxyHandler(configManager, cacheManager)
+	proxyHandler := handler.NewProxyHandler(currentConfig, cacheManager)
+	currentListenAddr := currentConfig.ListenAddr
 
 	server := &http.Server{
-		Addr:    currentConfig.ListenAddr,
+		Addr:    currentListenAddr,
 		Handler: proxyHandler,
 	}
 
 	serverMutex := &sync.Mutex{}
 	currentServer := server
-	currentListenAddr := currentConfig.ListenAddr
 
-	logger.Info("Starting proxy server on %s", currentConfig.ListenAddr)
+	logger.Info("Starting proxy server on %s", currentListenAddr)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGHUP, os.Interrupt, syscall.SIGTERM)
 
 	trayManager := tray.NewTrayManager()
 
-	restartServerIfAddressChanged := func() {
+	restartServerIfAddressChanged := func(newConfig *config.ProxyConfig) {
 		serverMutex.Lock()
 		defer serverMutex.Unlock()
 
-		newConfig := configManager.GetConfig()
 		newListenAddr := newConfig.ListenAddr
 
 		if newListenAddr != currentListenAddr {
@@ -115,26 +112,25 @@ func main() {
 	}
 
 	refreshExternalRules := func() {
-		configManager.RefreshExternalRules(proxyHandler.GetHTTPClient)
+		currentConfig.RefreshExternalRules(proxyHandler.GetHTTPClient)
 	}
 
 	reloadConfiguration := func(trigger string) {
 		logger.Info("%s: reloading configuration...", trigger)
-		if err := configManager.ReloadConfig(); err != nil {
+		newConfig, err := currentConfig.ReloadConfig()
+		if err != nil {
 			logger.Error("Error reloading configuration: %v", err)
 			return
 		}
-
-		newConfig := configManager.GetConfig()
 
 		if newConfig.AutoReloadHours != currentConfig.AutoReloadHours {
 			startTicker(newConfig.AutoReloadHours)
 		}
 		currentConfig = newConfig
 
-		proxyHandler.UpdateConfig(configManager)
+		proxyHandler.UpdateConfig(currentConfig)
 
-		restartServerIfAddressChanged()
+		restartServerIfAddressChanged(currentConfig)
 	}
 
 	go func() {

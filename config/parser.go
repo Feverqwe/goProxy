@@ -110,12 +110,6 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 		rule.parsedIps = parsedIps
 		rule.parsedURLs = parsedURLs
 	}
-
-	c.cache.PrecompilePatterns(c.GetAllHosts(), c.GetAllURLs(), c.GetAllIps())
-}
-
-func (c *ProxyConfig) RefreshExternalRules(configDir string, httpClientFunc HTTPClientFunc) {
-	c.preParseRuleLists(configDir, false, httpClientFunc)
 }
 
 func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc) (*RuleBaseConfig, error) {

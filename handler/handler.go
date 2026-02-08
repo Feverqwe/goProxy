@@ -25,16 +25,13 @@ type contextKey string
 const proxyURLContextKey contextKey = "proxyURL"
 
 type ProxyHandler struct {
-	configManager *config.ConfigManager
-	cache         *cache.CacheManager
-	decision      *ProxyDecision
-	proxyServer   *goproxy.ProxyHttpServer
-	mu            sync.RWMutex
+	cache       *cache.CacheManager
+	decision    *ProxyDecision
+	proxyServer *goproxy.ProxyHttpServer
+	mu          sync.RWMutex
 }
 
-func NewProxyHandler(configManager *config.ConfigManager, cacheManager *cache.CacheManager) *ProxyHandler {
-	config := configManager.GetConfig()
-
+func NewProxyHandler(config *config.ProxyConfig, cacheManager *cache.CacheManager) *ProxyHandler {
 	decision := NewProxyDecision(config, cacheManager)
 
 	proxyServer := goproxy.NewProxyHttpServer()
@@ -44,10 +41,9 @@ func NewProxyHandler(configManager *config.ConfigManager, cacheManager *cache.Ca
 	proxyServer.Logger = goproxyLogger
 
 	handler := &ProxyHandler{
-		configManager: configManager,
-		cache:         cacheManager,
-		decision:      decision,
-		proxyServer:   proxyServer,
+		cache:       cacheManager,
+		decision:    decision,
+		proxyServer: proxyServer,
 	}
 
 	tr := http.DefaultTransport.(*http.Transport).Clone()
@@ -58,12 +54,9 @@ func NewProxyHandler(configManager *config.ConfigManager, cacheManager *cache.Ca
 	return handler
 }
 
-func (p *ProxyHandler) UpdateConfig(configManager *config.ConfigManager) {
+func (p *ProxyHandler) UpdateConfig(config *config.ProxyConfig) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
-	p.configManager = configManager
-	config := configManager.GetConfig()
 
 	p.decision = NewProxyDecision(config, p.cache)
 
@@ -149,13 +142,11 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 
 func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isHTTPS bool) {
 	p.mu.RLock()
-	config := p.configManager.GetConfig()
-	decisionResult := p.decision.GetProxyForRequest(r)
+	proxyURL, decisionResult, err := p.decision.GetProxyForRequest(r)
 	p.mu.RUnlock()
 
-	proxyURL, exists := config.Proxies[decisionResult.Proxy]
-	if !exists {
-		logger.Error("Proxy key '%s' not found in proxies map", decisionResult.Proxy)
+	if err != nil {
+		logger.Error("Error getting proxy decision: %v", err)
 		http.Error(w, "Proxy configuration error", http.StatusInternalServerError)
 		return
 	}
@@ -202,9 +193,9 @@ func capitalize(s string) string {
 
 func (p *ProxyHandler) GetHTTPClient(targetURL string) (*http.Client, error) {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-
 	proxyURL, parsedURL, decisionResult, err := p.decision.GetProxyForURL(targetURL)
+	p.mu.RUnlock()
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get proxy decision: %v", err)
 	}
