@@ -10,17 +10,36 @@ import (
 	"goProxy/cache"
 	"goProxy/config"
 	"goProxy/logger"
+
+	lru "github.com/hashicorp/golang-lru/v2"
+	explru "github.com/hashicorp/golang-lru/v2/expirable"
 )
 
+type ProxyDecisionResult struct {
+	Proxy     string
+	RuleName  string
+	MatchType string // "url", "host", "ip", or "default"
+}
+
 type ProxyDecision struct {
-	config *config.ProxyConfig
-	cache  *cache.CacheManager
+	config    *config.ProxyConfig
+	cache     *cache.CacheManager
+	hostCache *lru.Cache[string, ProxyDecisionResult]
+	urlCache  *lru.Cache[string, ProxyDecisionResult]
+	ipCache   *explru.LRU[string, ProxyDecisionResult]
 }
 
 func NewProxyDecision(config *config.ProxyConfig, cacheManager *cache.CacheManager) *ProxyDecision {
+	hostCache, _ := lru.New[string, ProxyDecisionResult](1000)
+	urlCache, _ := lru.New[string, ProxyDecisionResult](1000)
+	ipCache := explru.NewLRU[string, ProxyDecisionResult](1000, nil, cache.IPResolutionTTL)
+
 	return &ProxyDecision{
-		config: config,
-		cache:  cacheManager,
+		config:    config,
+		cache:     cacheManager,
+		hostCache: hostCache,
+		urlCache:  urlCache,
+		ipCache:   ipCache,
 	}
 }
 
@@ -54,7 +73,7 @@ func (d *ProxyDecision) matchesURLPattern(pattern, url string) bool {
 	return g.Match(url)
 }
 
-func (d *ProxyDecision) GetProxyForRequest(r *http.Request) (proxyURL string, decision cache.ProxyDecisionResult, err error) {
+func (d *ProxyDecision) GetProxyForRequest(r *http.Request) (proxyURL string, decision ProxyDecisionResult, err error) {
 	host := r.URL.Hostname()
 	fullURL := r.URL.String()
 	decision = d.getProxyDecision(host, fullURL)
@@ -66,7 +85,7 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) (proxyURL string, de
 	return
 }
 
-func (d *ProxyDecision) GetProxyForURL(urlStr string) (proxyURL string, parsedURL *url.URL, decision cache.ProxyDecisionResult, err error) {
+func (d *ProxyDecision) GetProxyForURL(urlStr string) (proxyURL string, parsedURL *url.URL, decision ProxyDecisionResult, err error) {
 	parsedURL, err = url.Parse(urlStr)
 	if err != nil {
 		return
@@ -85,22 +104,22 @@ func (d *ProxyDecision) GetProxyForURL(urlStr string) (proxyURL string, parsedUR
 	return
 }
 
-func (d *ProxyDecision) getProxyDecision(host, fullURL string) cache.ProxyDecisionResult {
-	if result, exists := d.cache.GetURLDecision(fullURL); exists {
+func (d *ProxyDecision) getProxyDecision(host, fullURL string) ProxyDecisionResult {
+	if result, exists := d.urlCache.Get(fullURL); exists {
 		if d.config.ShouldLog(logger.LogLevelDebug) {
 			logger.Debug("URL cache hit for %s: proxy=%s, rule=%s", fullURL, result.Proxy, result.RuleName)
 		}
 		return result
 	}
 
-	if result, exists := d.cache.GetHostDecision(host); exists {
+	if result, exists := d.hostCache.Get(host); exists {
 		if d.config.ShouldLog(logger.LogLevelDebug) {
 			logger.Debug("Host cache hit for %s: proxy=%s, rule=%s", host, result.Proxy, result.RuleName)
 		}
 		return result
 	}
 
-	if result, exists := d.cache.GetIPDecision(host); exists {
+	if result, exists := d.ipCache.Get(host); exists {
 		if d.config.ShouldLog(logger.LogLevelDebug) {
 			logger.Debug("IP cache hit for %s: proxy=%s, rule=%s", host, result.Proxy, result.RuleName)
 		}
@@ -111,17 +130,17 @@ func (d *ProxyDecision) getProxyDecision(host, fullURL string) cache.ProxyDecisi
 
 	switch result.MatchType {
 	case "url":
-		d.cache.SetURLDecision(fullURL, result)
+		d.urlCache.Add(fullURL, result)
 	case "ip":
-		d.cache.SetIPDecision(host, result)
+		d.ipCache.Add(host, result)
 	default:
-		d.cache.SetHostDecision(host, result)
+		d.hostCache.Add(host, result)
 	}
 
 	return result
 }
 
-func (d *ProxyDecision) evaluateRules(host, fullURL string) cache.ProxyDecisionResult {
+func (d *ProxyDecision) evaluateRules(host, fullURL string) ProxyDecisionResult {
 	for _, rule := range d.config.Rules {
 		matchesRule := false
 		matchType := ""
@@ -223,7 +242,7 @@ func (d *ProxyDecision) evaluateRules(host, fullURL string) cache.ProxyDecisionR
 		}
 
 		if matchesRule {
-			return cache.ProxyDecisionResult{
+			return ProxyDecisionResult{
 				Proxy:     rule.Proxy,
 				RuleName:  ruleName,
 				MatchType: matchType,
@@ -231,7 +250,7 @@ func (d *ProxyDecision) evaluateRules(host, fullURL string) cache.ProxyDecisionR
 		}
 	}
 
-	return cache.ProxyDecisionResult{
+	return ProxyDecisionResult{
 		Proxy:     d.config.DefaultProxy,
 		RuleName:  "default",
 		MatchType: "default",

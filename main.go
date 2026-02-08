@@ -124,7 +124,7 @@ func main() {
 		}
 		currentConfig = newConfig
 
-		proxyHandler.UpdateConfig(currentConfig)
+		proxyHandler.UpdateConfig(currentConfig, cacheManager)
 
 		restartServerIfAddressChanged(currentConfig)
 	}

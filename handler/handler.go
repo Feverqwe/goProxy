@@ -25,7 +25,6 @@ type contextKey string
 const proxyURLContextKey contextKey = "proxyURL"
 
 type ProxyHandler struct {
-	cache       *cache.CacheManager
 	decision    *ProxyDecision
 	proxyServer *goproxy.ProxyHttpServer
 	mu          sync.RWMutex
@@ -41,7 +40,6 @@ func NewProxyHandler(config *config.ProxyConfig, cacheManager *cache.CacheManage
 	proxyServer.Logger = goproxyLogger
 
 	handler := &ProxyHandler{
-		cache:       cacheManager,
 		decision:    decision,
 		proxyServer: proxyServer,
 	}
@@ -54,11 +52,11 @@ func NewProxyHandler(config *config.ProxyConfig, cacheManager *cache.CacheManage
 	return handler
 }
 
-func (p *ProxyHandler) UpdateConfig(config *config.ProxyConfig) {
+func (p *ProxyHandler) UpdateConfig(config *config.ProxyConfig, cache *cache.CacheManager) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.decision = NewProxyDecision(config, p.cache)
+	p.decision = NewProxyDecision(config, cache)
 
 	goproxyLogger := logger.NewGoproxyLoggerAdapter(logger.GetLogger())
 	p.proxyServer.Logger = goproxyLogger

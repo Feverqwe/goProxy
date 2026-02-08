@@ -15,35 +15,20 @@ const (
 	IPResolutionTTL = 5 * time.Minute
 )
 
-type ProxyDecisionResult struct {
-	Proxy     string
-	RuleName  string
-	MatchType string // "url", "host", "ip", or "default"
-}
-
 type CacheManager struct {
 	globCache map[string]glob.Glob
 	cidrCache map[string]*net.IPNet
 	dnsCache  *lru.LRU[string, []net.IP]
-	hostCache *lru.LRU[string, ProxyDecisionResult]
-	urlCache  *lru.LRU[string, ProxyDecisionResult]
-	ipCache   *lru.LRU[string, ProxyDecisionResult]
 	mu        sync.RWMutex
 }
 
 func NewCacheManager() *CacheManager {
 	dnsCache := lru.NewLRU[string, []net.IP](1000, nil, IPResolutionTTL)
-	hostCache := lru.NewLRU[string, ProxyDecisionResult](1000, nil, 0) // No TTL for host cache
-	urlCache := lru.NewLRU[string, ProxyDecisionResult](1000, nil, 0)  // No TTL for URL cache
-	ipCache := lru.NewLRU[string, ProxyDecisionResult](1000, nil, IPResolutionTTL)
 
 	return &CacheManager{
 		globCache: make(map[string]glob.Glob),
 		cidrCache: make(map[string]*net.IPNet),
 		dnsCache:  dnsCache,
-		hostCache: hostCache,
-		urlCache:  urlCache,
-		ipCache:   ipCache,
 	}
 }
 
@@ -139,32 +124,4 @@ func (c *CacheManager) PrecompilePatterns(hostPatterns, urlPatterns, ipPatterns 
 			c.cidrCache[cidr] = ipNet
 		}
 	}
-
-	c.urlCache.Purge()
-	c.hostCache.Purge()
-	c.ipCache.Purge()
-}
-
-func (c *CacheManager) GetURLDecision(url string) (ProxyDecisionResult, bool) {
-	return c.urlCache.Get(url)
-}
-
-func (c *CacheManager) SetURLDecision(url string, result ProxyDecisionResult) {
-	c.urlCache.Add(url, result)
-}
-
-func (c *CacheManager) GetHostDecision(host string) (ProxyDecisionResult, bool) {
-	return c.hostCache.Get(host)
-}
-
-func (c *CacheManager) SetHostDecision(host string, result ProxyDecisionResult) {
-	c.hostCache.Add(host, result)
-}
-
-func (c *CacheManager) GetIPDecision(ip string) (ProxyDecisionResult, bool) {
-	return c.ipCache.Get(ip)
-}
-
-func (c *CacheManager) SetIPDecision(ip string, result ProxyDecisionResult) {
-	c.ipCache.Add(ip, result)
 }
