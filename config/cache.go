@@ -83,15 +83,27 @@ func downloadWithClient(downloadURL, cacheFile string, client *http.Client, logg
 		return "", fmt.Errorf("failed to download %s: status %d", downloadURL, resp.StatusCode)
 	}
 
-	file, err := os.Create(cacheFile)
+	tempFile := cacheFile + ".tmp"
+	file, err := os.Create(tempFile)
 	if err != nil {
-		return "", fmt.Errorf("failed to create cache file: %v", err)
+		return "", fmt.Errorf("failed to create temporary file: %v", err)
 	}
 	defer file.Close()
 
 	_, err = io.Copy(file, resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to write cache file: %v", err)
+		return "", fmt.Errorf("failed to write temporary file: %v", err)
+	}
+
+	file.Close()
+
+	if _, err := os.Stat(cacheFile); err == nil {
+		os.Remove(cacheFile)
+	}
+
+	err = os.Rename(tempFile, cacheFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to rename temporary file to cache file: %v", err)
 	}
 
 	return cacheFile, nil
