@@ -171,9 +171,14 @@ func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isH
 	currentDecision := p.decision
 	p.mu.RUnlock()
 
-	target := r.URL.Host
+	targetHost := r.URL.Host
 	if isHTTPS {
-		target = r.Host
+		targetHost = r.Host
+	}
+
+	target := targetHost
+	if h, _, err := net.SplitHostPort(targetHost); err == nil {
+		target = h
 	}
 
 	proxyURL, decisionResult, err := currentDecision.GetProxyForHost(target)

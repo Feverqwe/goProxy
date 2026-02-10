@@ -40,15 +40,7 @@ func NewProxyDecision(config *config.ProxyConfig, cacheManager *cache.CacheManag
 }
 
 func (d *ProxyDecision) matchesGlob(pattern, s string) bool {
-	hostWithoutPort := s
-
-	if h, _, err := net.SplitHostPort(s); err == nil {
-		hostWithoutPort = h
-	} else {
-		hostWithoutPort = s
-	}
-
-	if pattern == hostWithoutPort {
+	if pattern == s {
 		return true
 	}
 
@@ -57,7 +49,7 @@ func (d *ProxyDecision) matchesGlob(pattern, s string) bool {
 		return false
 	}
 
-	return g.Match(hostWithoutPort)
+	return g.Match(s)
 }
 
 func (d *ProxyDecision) GetProxyForHost(host string) (proxyURL string, decision ProxyDecisionResult, err error) {
