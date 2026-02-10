@@ -1,17 +1,19 @@
 # GoProxy - Advanced HTTP/HTTPS Proxy Server
 
-GoProxy is a sophisticated HTTP/HTTPS proxy server written in Go that provides intelligent routing, caching, and system tray integration. It supports multiple proxy types, rule-based routing, and hot-reloadable configuration.
+GoProxy is a sophisticated HTTP/HTTPS proxy server written in Go that provides intelligent routing, caching, and system tray integration. It supports multiple proxy types, rule-based routing, hot-reloadable configuration.
 
 ## Features
 
-- **Multi-Protocol Support**: HTTP, HTTPS, SOCKS5 proxy support
+- **Multi-Protocol Support**: HTTP, HTTPS, SOCKS5 proxy support with authentication
 - **Rule-Based Routing**: Advanced pattern matching for IPs, hosts, and URLs
-- **Hot Reload**: Configuration reload without restart (SIGHUP or tray menu)
+- **Hot Reload**: Configuration reload without restart (SIGHUP, tray menu, or periodic)
 - **System Tray Integration**: Native system tray support (Windows/macOS)
-- **Caching**: DNS and pattern caching for performance
+- **Caching**: DNS, pattern, and CIDR caching for performance
 - **Logging**: Configurable logging with file rotation
 - **Cross-Platform**: Windows, macOS, and Linux support
 - **Blocking Support**: Ability to block specific domains/URLs
+- **External Rule Sources**: Support for loading rules from URLs and local files
+- **Inverted Rules**: Support for "not" logic to match everything except specified patterns
 
 ## Installation
 
@@ -28,7 +30,7 @@ Download the latest release from the [Releases page](https://github.com/Feverqwe
 1. **Prerequisites**: Go 1.24.0 or later
 2. **Clone the repository**:
    ```bash
-   git clone https://github.com/rndnm/goProxy.git
+   git clone https://github.com/Feverqwe/goProxy.git
    cd goProxy
    ```
 3. **Build for your platform**:
@@ -78,6 +80,7 @@ logLevel: "info"
 logFile: "goProxy.log"
 maxLogSize: 10
 maxLogFiles: 5
+autoReloadHours: 24
 
 rules:
   # Rule 1: Direct connection for local networks and internal domains
@@ -85,7 +88,6 @@ rules:
     proxy: "direct"
     ips: "192.168.1.0/24 10.0.0.0/8 172.16.0.0/12"
     hosts: "localhost *.local *.example.com internal.company.com"
-    urls: "http://internal-api.company.com/v1/* https://*.internal.com/api/*"
 
   # Rule 2: Block domains using external DNS blocklists
   - proxy: "block"
@@ -119,6 +121,7 @@ rules:
 - `logFile`: Log file path (relative to config directory)
 - `maxLogSize`: Maximum log file size in MB before rotation
 - `maxLogFiles`: Number of backup log files to keep
+- `autoReloadHours`: Automatic configuration reload interval in hours (0 to disable)
 
 #### Proxy Definitions
 - `direct`: No proxy (direct connection)
@@ -130,10 +133,8 @@ Rules are evaluated in order. Each rule can match based on:
 - `name`: Optional descriptive name for the rule (used in logging)
 - `ips`: CIDR notation or IP addresses
 - `hosts`: Hostname patterns with wildcards (`*.example.com`)
-- `urls`: Full URL patterns with wildcards
 - `externalIps`: External sources for IP rules (URLs or local file paths)
 - `externalHosts`: External sources for host rules (URLs or local file paths)
-- `externalURLs`: External sources for URL rules (URLs or local file paths)
 - `externalRule`: External YAML file containing rule configuration (without Proxy field)
 - `not`: Invert the rule logic (match everything EXCEPT the patterns)
 
@@ -157,7 +158,6 @@ Example external rule file (`external-rules.yaml`):
 name: "External Rule Set"
 ips: "192.168.100.0/24 10.100.0.0/16"
 hosts: "*.external.com api.external.com"
-urls: "https://api.external.com/v1/*"
 externalIps: "http://example.com/ips.txt"
 externalHosts: "http://example.com/hosts.txt"
 not: false
@@ -207,9 +207,6 @@ GoProxy uses sophisticated pattern matching with intelligent caching:
 - Individual IPs: `192.168.1.1`
 - Domain resolution: Hostnames are resolved to IPs for matching with DNS caching
 
-### URL Matching
-- Full URL patterns: `https://api.example.com/v1/*`
-- Supports wildcards in any part of the URL
 
 ### Rule Evaluation
 1. Rules are processed in order from top to bottom
@@ -217,15 +214,15 @@ GoProxy uses sophisticated pattern matching with intelligent caching:
    - External rule files (`externalRule`) are loaded first
    - Fields from external rule are merged with main rule (Ips, Hosts, URLs, etc.)
    - External rule lists (`externalIps`, `externalHosts`, `externalURLs`) are loaded and parsed
-3. Matching is attempted in this order: URL → Host → IP
+3. Matching is attempted in this order: Host → IP
 4. First matching rule determines the proxy to use
 5. If no rules match, the `defaultProxy` is used
 6. Inverted rules (`not: true`) match everything EXCEPT the specified patterns
 
 ### External Rule Merging
 When using `externalRule`, fields are merged as follows:
-- **Ips, Hosts, URLs**: Concatenated with newlines, then parsed together
-- **ExternalIps, ExternalHosts, ExternalURLs**: Also concatenated and loaded
+- **Ips, Hosts**: Concatenated with newlines, then parsed together
+- **ExternalIps, ExternalHosts**: Also concatenated and loaded
 - **Name**: Uses main rule name if specified, otherwise external rule name
 - **Not**: Uses main rule setting if specified, otherwise external rule setting
 
@@ -257,12 +254,13 @@ Example:
 
 ### Core Components
 
-- **Main Application** ([`main.go`](main.go)): Orchestrates the proxy server and system tray
-- **Configuration Management** ([`config/`](config/)): YAML config parsing and management
+- **Main Application** ([`main.go`](main.go)): Orchestrates the proxy server, system tray, and auto-reload functionality
+- **Configuration Management** ([`config/`](config/)): YAML config parsing, external rule loading, and management
 - **Proxy Handler** ([`handler/`](handler/)): HTTP request handling and routing logic with support for HTTP, HTTPS, and SOCKS5
 - **Caching System** ([`cache/`](cache/)): DNS, pattern, and CIDR caching for performance
-- **Logging System** ([`logging/`](logging/)): Configurable logging infrastructure
-- **System Tray** ([`tray/`](tray/)): Platform-specific system tray integration
+- **Logging System** ([`logging/`](logging/)): Configurable logging infrastructure with file rotation
+- **System Tray** ([`tray/`](tray/)): Platform-specific system tray integration (Windows/macOS)
+- **Ticker Manager** ([`ticker/`](ticker/)): Automatic periodic configuration reload functionality
 
 ### Proxy Handler Features
 
@@ -282,6 +280,8 @@ Example:
 - [`github.com/hashicorp/golang-lru/v2`](https://github.com/hashicorp/golang-lru): LRU caching
 - [`golang.org/x/net/proxy`](https://pkg.go.dev/golang.org/x/net/proxy): SOCKS5 proxy support
 - [`gopkg.in/yaml.v3`](https://github.com/go-yaml/yaml): YAML configuration parsing
+- [`gopkg.in/natefinch/lumberjack.v2`](https://github.com/natefinch/lumberjack): Log file rotation
+- [`github.com/skratchdot/open-golang`](https://github.com/skratchdot/open-golang): Opening config directory
 
 ### Building and Testing
 
