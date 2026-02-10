@@ -43,24 +43,12 @@ func (c *ProxyConfig) GetAllHosts() []string {
 	return allHosts
 }
 
-func (c *ProxyConfig) GetAllURLs() []string {
-	var allURLs []string
-	for _, rule := range c.Rules {
-		allURLs = append(allURLs, rule.parsedURLs...)
-	}
-	return allURLs
-}
-
 func (r *RuleConfig) GetParsedIps() []string {
 	return r.parsedIps
 }
 
 func (r *RuleConfig) GetParsedHosts() []string {
 	return r.parsedHosts
-}
-
-func (r *RuleConfig) GetParsedURLs() []string {
-	return r.parsedURLs
 }
 
 func (c *ProxyConfig) GetAccessLogPath() string {

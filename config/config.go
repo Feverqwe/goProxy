@@ -30,7 +30,6 @@ func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientF
 					Name:  "Local Networks",
 					Ips:   "192.168.1.0/24 10.0.0.0/8 172.16.0.0/12",
 					Hosts: "localhost *.local *.example.com internal.company.com",
-					URLs:  "http://internal-api.company.com/v1/* https://*.internal.com/api/*",
 				},
 				Proxy: "direct",
 			},
@@ -96,7 +95,7 @@ func (c *ProxyConfig) afterLoad(httpClientFunc HTTPClientFunc, cacheOnly bool) {
 
 	c.preParseRuleLists(configDir, cacheOnly, httpClientFunc)
 
-	c.cache.PrecompilePatterns(c.GetAllHosts(), c.GetAllURLs(), c.GetAllIps())
+	c.cache.PrecompilePatterns(c.GetAllHosts(), c.GetAllIps())
 }
 
 func saveDefaultConfig(configPath string, config *ProxyConfig) error {

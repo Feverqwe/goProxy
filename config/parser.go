@@ -65,7 +65,6 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 
 		parsedIps := parseStringToList(strings.TrimSpace(rule.Ips+"\n"+externalRule.Ips), false)
 		parsedHosts := parseStringToList(strings.TrimSpace(rule.Hosts+"\n"+externalRule.Hosts), true)
-		parsedURLs := parseStringToList(strings.TrimSpace(rule.URLs+"\n"+externalRule.URLs), false)
 
 		type loadTask struct {
 			sources         []string
@@ -76,7 +75,6 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 		tasks := []loadTask{
 			{parseStringToList(strings.TrimSpace(rule.ExternalIps+"\n"+externalRule.ExternalIps), false), false, &parsedIps},
 			{parseStringToList(strings.TrimSpace(rule.ExternalHosts+"\n"+externalRule.ExternalHosts), false), true, &parsedHosts},
-			{parseStringToList(strings.TrimSpace(rule.ExternalURLs+"\n"+externalRule.ExternalURLs), false), false, &parsedURLs},
 		}
 
 		var wg sync.WaitGroup
@@ -107,7 +105,6 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 
 		rule.parsedHosts = parsedHosts
 		rule.parsedIps = parsedIps
-		rule.parsedURLs = parsedURLs
 	}
 }
 

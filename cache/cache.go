@@ -100,7 +100,7 @@ func (c *CacheManager) ResolveHost(hostname string) ([]net.IP, error) {
 	return ips, nil
 }
 
-func (c *CacheManager) PrecompilePatterns(hostPatterns, urlPatterns, ipPatterns []string) {
+func (c *CacheManager) PrecompilePatterns(hostPatterns, ipPatterns []string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -108,12 +108,6 @@ func (c *CacheManager) PrecompilePatterns(hostPatterns, urlPatterns, ipPatterns 
 	c.cidrCache = make(map[string]*net.IPNet)
 
 	for _, pattern := range hostPatterns {
-		if g, err := glob.Compile(pattern); err == nil {
-			c.globCache[pattern] = g
-		}
-	}
-
-	for _, pattern := range urlPatterns {
 		if g, err := glob.Compile(pattern); err == nil {
 			c.globCache[pattern] = g
 		}

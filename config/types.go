@@ -21,15 +21,12 @@ type RuleBaseConfig struct {
 	Name          string `yaml:"name,omitempty"`
 	Ips           string `yaml:"ips,omitempty"`
 	Hosts         string `yaml:"hosts,omitempty"`
-	URLs          string `yaml:"urls,omitempty"`
 	ExternalIps   string `yaml:"externalIps,omitempty"`
 	ExternalHosts string `yaml:"externalHosts,omitempty"`
-	ExternalURLs  string `yaml:"externalURLs,omitempty"`
 	ExternalRule  string `yaml:"externalRule,omitempty"`
 
 	parsedIps   []string
 	parsedHosts []string
-	parsedURLs  []string
 }
 
 type RuleConfig struct {

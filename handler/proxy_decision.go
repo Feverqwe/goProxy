@@ -3,8 +3,6 @@ package handler
 import (
 	"fmt"
 	"net"
-	"net/http"
-	"net/url"
 
 	"goProxy/cache"
 	"goProxy/config"
@@ -17,28 +15,25 @@ import (
 type ProxyDecisionResult struct {
 	Proxy     string
 	RuleName  string
-	MatchType string // "url", "host", "ip", or "default"
+	MatchType string // "host", "ip", or "default"
 }
 
 type ProxyDecision struct {
 	config    *config.ProxyConfig
 	cache     *cache.CacheManager
 	hostCache *lru.Cache[string, ProxyDecisionResult]
-	urlCache  *lru.Cache[string, ProxyDecisionResult]
 	ipCache   *explru.LRU[string, ProxyDecisionResult]
 	logger    *logging.Logger
 }
 
 func NewProxyDecision(config *config.ProxyConfig, cacheManager *cache.CacheManager, logger *logging.Logger) *ProxyDecision {
 	hostCache, _ := lru.New[string, ProxyDecisionResult](1000)
-	urlCache, _ := lru.New[string, ProxyDecisionResult](1000)
 	ipCache := explru.NewLRU[string, ProxyDecisionResult](1000, nil, cache.IPResolutionTTL)
 
 	return &ProxyDecision{
 		config:    config,
 		cache:     cacheManager,
 		hostCache: hostCache,
-		urlCache:  urlCache,
 		ipCache:   ipCache,
 		logger:    logger,
 	}
@@ -65,19 +60,8 @@ func (d *ProxyDecision) matchesGlob(pattern, s string) bool {
 	return g.Match(hostWithoutPort)
 }
 
-func (d *ProxyDecision) matchesURLPattern(pattern, url string) bool {
-	g, err := d.cache.GetGlob(pattern)
-	if err != nil {
-		return false
-	}
-
-	return g.Match(url)
-}
-
-func (d *ProxyDecision) GetProxyForRequest(r *http.Request) (proxyURL string, decision ProxyDecisionResult, err error) {
-	host := r.URL.Hostname()
-	fullURL := r.URL.String()
-	decision = d.getProxyDecision(host, fullURL)
+func (d *ProxyDecision) GetProxyForHost(host string) (proxyURL string, decision ProxyDecisionResult, err error) {
+	decision = d.getProxyDecision(host)
 	var exists bool
 	proxyURL, exists = d.config.Proxies[decision.Proxy]
 	if !exists {
@@ -86,31 +70,7 @@ func (d *ProxyDecision) GetProxyForRequest(r *http.Request) (proxyURL string, de
 	return
 }
 
-func (d *ProxyDecision) GetProxyForURL(urlStr string) (proxyURL string, parsedURL *url.URL, decision ProxyDecisionResult, err error) {
-	parsedURL, err = url.Parse(urlStr)
-	if err != nil {
-		return
-	}
-
-	if parsedURL.Scheme == "" {
-		parsedURL.Scheme = "http"
-	}
-
-	host := parsedURL.Hostname()
-	fullURL := parsedURL.String()
-
-	decision = d.getProxyDecision(host, fullURL)
-
-	proxyURL = d.config.Proxies[decision.Proxy]
-	return
-}
-
-func (d *ProxyDecision) getProxyDecision(host, fullURL string) ProxyDecisionResult {
-	if result, exists := d.urlCache.Get(fullURL); exists {
-		d.logger.Debug("URL cache hit for %s: proxy=%s, rule=%s", fullURL, result.Proxy, result.RuleName)
-		return result
-	}
-
+func (d *ProxyDecision) getProxyDecision(host string) ProxyDecisionResult {
 	if result, exists := d.hostCache.Get(host); exists {
 		d.logger.Debug("Host cache hit for %s: proxy=%s, rule=%s", host, result.Proxy, result.RuleName)
 		return result
@@ -121,11 +81,9 @@ func (d *ProxyDecision) getProxyDecision(host, fullURL string) ProxyDecisionResu
 		return result
 	}
 
-	result := d.evaluateRules(host, fullURL)
+	result := d.evaluateRules(host)
 
 	switch result.MatchType {
-	case "url":
-		d.urlCache.Add(fullURL, result)
 	case "ip":
 		d.ipCache.Add(host, result)
 	default:
@@ -135,26 +93,15 @@ func (d *ProxyDecision) getProxyDecision(host, fullURL string) ProxyDecisionResu
 	return result
 }
 
-func (d *ProxyDecision) evaluateRules(host, fullURL string) ProxyDecisionResult {
+func (d *ProxyDecision) evaluateRules(host string) ProxyDecisionResult {
 	for _, rule := range d.config.Rules {
 		matchesRule := false
 		matchType := ""
 
-		urlRules := rule.GetParsedURLs()
 		ipRules := rule.GetParsedIps()
 		hostRules := rule.GetParsedHosts()
 
-		if len(urlRules) > 0 {
-			for _, urlRule := range urlRules {
-				if d.matchesURLPattern(urlRule, fullURL) {
-					matchesRule = true
-					matchType = "url"
-					break
-				}
-			}
-		}
-
-		if !matchesRule && len(hostRules) > 0 {
+		if len(hostRules) > 0 {
 			for _, hostRule := range hostRules {
 				if d.matchesGlob(hostRule, host) {
 					matchesRule = true

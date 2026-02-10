@@ -171,7 +171,12 @@ func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isH
 	currentDecision := p.decision
 	p.mu.RUnlock()
 
-	proxyURL, decisionResult, err := currentDecision.GetProxyForRequest(r)
+	target := r.URL.Host
+	if isHTTPS {
+		target = r.Host
+	}
+
+	proxyURL, decisionResult, err := currentDecision.GetProxyForHost(target)
 
 	if err != nil {
 		p.logger.Error("Error getting proxy decision: %v", err)
@@ -180,19 +185,11 @@ func (p *ProxyHandler) handleRequest(w http.ResponseWriter, r *http.Request, isH
 	}
 
 	if proxyURL == "#" {
-		target := r.URL.Host
-		if isHTTPS {
-			target = r.Host
-		}
 		p.logger.Info("Blocking %s request to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
 		http.Error(w, "Request blocked by proxy configuration", http.StatusForbidden)
 		return
 	}
 
-	target := r.URL.Host
-	if isHTTPS {
-		target = r.Host
-	}
 	if proxyURL == "" {
 		p.logger.Info("Direct %s to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
 	} else {
@@ -224,14 +221,18 @@ func (p *ProxyHandler) GetHTTPClient(targetURL string) (*http.Client, error) {
 	currentDecision := p.decision
 	p.mu.RUnlock()
 
-	proxyURL, parsedURL, decisionResult, err := currentDecision.GetProxyForURL(targetURL)
+	parsedURL, err := url.Parse(targetURL)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing URL: %w", err)
+	}
 
+	target := parsedURL.Host
+	isHTTPS := parsedURL.Scheme == "https"
+
+	proxyURL, decisionResult, err := currentDecision.GetProxyForHost(target)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get proxy decision: %v", err)
 	}
-
-	isHTTPS := parsedURL.Scheme == "https"
-	target := parsedURL.Host
 
 	if proxyURL == "#" {
 		return nil, fmt.Errorf("request blocked by proxy configuration")
