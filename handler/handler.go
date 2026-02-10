@@ -231,7 +231,7 @@ func (p *ProxyHandler) GetHTTPClient(targetURL string) (*http.Client, error) {
 		return nil, fmt.Errorf("error parsing URL: %w", err)
 	}
 
-	target := parsedURL.Host
+	target := parsedURL.Hostname()
 	isHTTPS := parsedURL.Scheme == "https"
 
 	proxyURL, decisionResult, err := currentDecision.GetProxyForHost(target)
