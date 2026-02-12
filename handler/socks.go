@@ -15,7 +15,6 @@ import (
 )
 
 type SocksHandler struct {
-	decision       *ProxyDecision
 	ph             *ProxyHandler
 	logger         *logging.Logger
 	udpManager     *UDPSessionManager
@@ -24,7 +23,6 @@ type SocksHandler struct {
 
 func NewSocksHandler(ph *ProxyHandler, config *config.ProxyConfig, cacheManager *cache.CacheManager, logger *logging.Logger) *SocksHandler {
 	return &SocksHandler{
-		decision:       ph.decision,
 		ph:             ph,
 		logger:         logger,
 		udpManager:     NewUDPSessionManager(5 * time.Minute),
@@ -69,7 +67,7 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 	targetHost := r.Address()
 	target, _, _ := net.SplitHostPort(targetHost)
 
-	proxyURL, decision, err := s.decision.GetProxyForHost(target)
+	proxyURL, decision, err := s.ph.decision.GetProxyForHost(target)
 	if err != nil {
 		s.logger.Error("SOCKS5 Decision Error: %v", err)
 		rep := socks5.NewReply(socks5.RepHostUnreachable, socks5.ATYPIPv4, []byte{0, 0, 0, 0}, []byte{0, 0})
@@ -124,7 +122,7 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 	target, _, _ := net.SplitHostPort(targetHost)
 	clientKey := addr.String() + "->" + targetHost
 
-	proxyURL, decision, err := s.decision.GetProxyForHost(target)
+	proxyURL, decision, err := s.ph.decision.GetProxyForHost(target)
 	if err != nil {
 		s.logger.Error("SOCKS5 UDP Decision Error: %v", err)
 		return nil
