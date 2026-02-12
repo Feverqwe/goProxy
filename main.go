@@ -171,8 +171,12 @@ func main() {
 		tickerManager.StopOldTicker()
 
 		logger.Info("Shutting down...")
-		currentHttpServer.Close()
-		currentSocksServer.Shutdown()
+		if currentHttpServer != nil {
+			currentHttpServer.Close()
+		}
+		if currentSocksServer != nil {
+			currentSocksServer.Shutdown()
+		}
 		logger.Info("Proxy server stopped")
 	}()
 
