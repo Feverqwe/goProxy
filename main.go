@@ -14,6 +14,8 @@ import (
 	"goProxy/handler"
 	"goProxy/ticker"
 	"goProxy/tray"
+
+	"github.com/txthinking/socks5"
 )
 
 func main() {
@@ -40,32 +42,66 @@ func main() {
 	proxyHandler := handler.NewProxyHandler(currentConfig, cacheManager, logger)
 
 	var currentServer *http.Server
+	var currentSocksServer *socks5.Server
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGHUP, os.Interrupt, syscall.SIGTERM)
 
 	trayManager := tray.NewTrayManager()
 
-	startServer := func(listenAddr string) {
+	startServer := func(addr string) {
 		if currentServer != nil {
 			if err := currentServer.Close(); err != nil {
 				logger.Error("Error closing old server: %v", err)
 			}
 		}
 
+		if addr == "" {
+			return
+		}
+
 		newServer := &http.Server{
-			Addr:    listenAddr,
+			Addr:    addr,
 			Handler: proxyHandler,
 		}
 
 		go func() {
-			logger.Info("Starting proxy server on %s", listenAddr)
+			logger.Info("Starting proxy server on %s", addr)
 			if err := newServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				logger.Error("Server error: %v", err)
 			}
 		}()
 
 		currentServer = newServer
+	}
+
+	startSocksServer := func(addr string, ph *handler.ProxyHandler) {
+		if currentSocksServer != nil {
+			logger.Info("Stopping old SOCKS5 server...")
+			currentSocksServer.Shutdown()
+		}
+
+		if addr == "" {
+			return
+		}
+
+		// Create the handler using txthinking/socks5
+		sh := handler.NewSocksHandler(ph, currentConfig, cacheManager, logger)
+
+		socksServer, err := socks5.NewClassicServer(addr, "", "", "", 30, 30) // No auth, 30s timeouts
+		if err != nil {
+			logger.Error("Failed to init SOCKS5 server: %v", err)
+			return
+		}
+
+		go func() {
+			logger.Info("Starting SOCKS5 server on %s", addr)
+			if err := socksServer.ListenAndServe(sh); err != nil {
+				logger.Debug("SOCKS5 server closed: %v", err)
+			}
+		}()
+
+		currentSocksServer = socksServer
 	}
 
 	tickerManager := ticker.NewTickerManager()
@@ -82,7 +118,8 @@ func main() {
 		}
 
 		prevAutoReloadHours := currentConfig.AutoReloadHours
-		prevListenAddr := currentConfig.ListenAddr
+		prevListenHttpAddr := currentConfig.ListenHttpAddr
+		prevListenSocksAddr := currentConfig.ListenSocksAddr
 
 		currentConfig = newConfig
 
@@ -90,8 +127,12 @@ func main() {
 			tickerManager.StartTicker(newConfig.AutoReloadHours)
 		}
 
-		if newConfig.ListenAddr != prevListenAddr {
-			startServer(newConfig.ListenAddr)
+		if newConfig.ListenHttpAddr != prevListenHttpAddr {
+			startServer(newConfig.ListenHttpAddr)
+		}
+
+		if newConfig.ListenSocksAddr != prevListenSocksAddr {
+			startSocksServer(newConfig.ListenSocksAddr, proxyHandler)
 		}
 
 		proxyHandler.UpdateConfig(currentConfig, cacheManager)
@@ -119,7 +160,8 @@ func main() {
 		}
 	}()
 
-	startServer(currentConfig.ListenAddr)
+	startServer(currentConfig.ListenHttpAddr)
+	startSocksServer(currentConfig.ListenSocksAddr, proxyHandler)
 
 	tickerManager.StartTicker(currentConfig.AutoReloadHours)
 
@@ -128,9 +170,12 @@ func main() {
 
 		tickerManager.StopOldTicker()
 
-		logger.Info("Shutting down proxy server...")
+		logger.Info("Shutting down...")
 		if err := currentServer.Close(); err != nil {
-			logger.Error("Error closing server: %v", err)
+			logger.Error("Error closing http server: %v", err)
+		}
+		if err := currentSocksServer.Shutdown(); err != nil {
+			logger.Error("Error closing socks server: %v", err)
 		}
 		logger.Info("Proxy server stopped")
 	}()

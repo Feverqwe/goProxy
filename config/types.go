@@ -38,7 +38,8 @@ type RuleConfig struct {
 type ProxyConfig struct {
 	DefaultProxy    string            `yaml:"defaultProxy"`
 	Proxies         map[string]string `yaml:"proxies"`
-	ListenAddr      string            `yaml:"listenAddr"`
+	ListenHttpAddr  string            `yaml:"listenHttpAddr"`
+	ListenSocksAddr string            `yaml:"listenSocksAddr"`
 	LogLevel        string            `yaml:"logLevel"`
 	LogFile         string            `yaml:"logFile,omitempty"`
 	MaxLogSize      int               `yaml:"maxLogSize,omitempty"`
