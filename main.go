@@ -41,7 +41,7 @@ func main() {
 	logger := currentConfig.GetLogger()
 	proxyHandler := handler.NewProxyHandler(currentConfig, cacheManager, logger)
 
-	var currentServer *http.Server
+	var currentHttpServer *http.Server
 	var currentSocksServer *socks5.Server
 
 	sigChan := make(chan os.Signal, 1)
@@ -50,8 +50,8 @@ func main() {
 	trayManager := tray.NewTrayManager()
 
 	startServer := func(addr string) {
-		if currentServer != nil {
-			if err := currentServer.Close(); err != nil {
+		if currentHttpServer != nil {
+			if err := currentHttpServer.Close(); err != nil {
 				logger.Error("Error closing old server: %v", err)
 			}
 		}
@@ -72,7 +72,7 @@ func main() {
 			}
 		}()
 
-		currentServer = newServer
+		currentHttpServer = newServer
 	}
 
 	startSocksServer := func(addr string, ph *handler.ProxyHandler) {
@@ -171,12 +171,8 @@ func main() {
 		tickerManager.StopOldTicker()
 
 		logger.Info("Shutting down...")
-		if err := currentServer.Close(); err != nil {
-			logger.Error("Error closing http server: %v", err)
-		}
-		if err := currentSocksServer.Shutdown(); err != nil {
-			logger.Error("Error closing socks server: %v", err)
-		}
+		currentHttpServer.Close()
+		currentSocksServer.Shutdown()
 		logger.Info("Proxy server stopped")
 	}()
 

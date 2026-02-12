@@ -15,23 +15,57 @@ import (
 )
 
 type SocksHandler struct {
-	decision   *ProxyDecision
-	ph         *ProxyHandler
-	logger     *logging.Logger
-	udpManager *UDPSessionManager
+	decision       *ProxyDecision
+	ph             *ProxyHandler
+	logger         *logging.Logger
+	udpManager     *UDPSessionManager
+	defaultHandler *socks5.DefaultHandle
 }
 
 func NewSocksHandler(ph *ProxyHandler, config *config.ProxyConfig, cacheManager *cache.CacheManager, logger *logging.Logger) *SocksHandler {
 	return &SocksHandler{
-		decision:   ph.decision,
-		ph:         ph,
-		logger:     logger,
-		udpManager: NewUDPSessionManager(5 * time.Minute),
+		decision:       ph.decision,
+		ph:             ph,
+		logger:         logger,
+		udpManager:     NewUDPSessionManager(5 * time.Minute),
+		defaultHandler: &socks5.DefaultHandle{},
 	}
 }
 
 // TCPHandle handles SOCKS5 CONNECT requests
 func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *socks5.Request) error {
+	// If it's a UDP Associate request, we don't dial anything yet.
+	// We just tell the client we are ready to relay.
+	if r.Cmd == socks5.CmdUDP {
+		// 1. Get the actual UDP address the server is listening on
+		uaddr, err := net.ResolveUDPAddr("udp", server.UDPConn.LocalAddr().String())
+		if err != nil {
+			return err
+		}
+
+		// 2. Prepare the reply with the REAL IP and Port
+		// If listening on :1080 (0.0.0.0), we can send 0.0.0.0,
+		// but the Port MUST be correct.
+		port := []byte{byte(uaddr.Port >> 8), byte(uaddr.Port & 0xff)}
+
+		// We send 0,0,0,0 as the IP (meaning: "send to the same IP you connected to via TCP")
+		// but we MUST provide the correct Port.
+		rep := socks5.NewReply(socks5.RepSuccess, socks5.ATYPIPv4, []byte{0, 0, 0, 0}, port)
+
+		if _, err := rep.WriteTo(conn); err != nil {
+			return err
+		}
+
+		// 3. Keep TCP alive (as before)
+		b := make([]byte, 1)
+		for {
+			_, err := conn.Read(b)
+			if err != nil {
+				return nil
+			}
+		}
+	}
+
 	targetHost := r.Address()
 	target, _, _ := net.SplitHostPort(targetHost)
 
@@ -109,7 +143,7 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 		// Logic for new UDP session
 		if proxyURL == "" {
 			s.logger.Info("SOCKS5 UDP Direct: %s (rule: %s)", target, decision.RuleName)
-			return server.Handle.UDPHandle(server, addr, d) // Fallback to local server relay
+			return s.defaultHandler.UDPHandle(server, addr, d) // Fallback to local server relay
 		}
 
 		s.logger.Info("SOCKS5 UDP Proxy: %s via %s (rule: %s)", target, decision.Proxy, decision.RuleName)
@@ -117,7 +151,7 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 		parsedURL, err := url.Parse(proxyURL)
 		if err != nil || (parsedURL.Scheme != "socks5" && parsedURL.Scheme != "socks5h") {
 			s.logger.Warn("UDP Associate only supports SOCKS5 upstream. Falling back to direct for %s", target)
-			return server.Handle.UDPHandle(server, addr, d)
+			return s.defaultHandler.UDPHandle(server, addr, d)
 		}
 
 		user, pass := "", ""
