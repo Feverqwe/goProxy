@@ -1,10 +1,11 @@
-# GoProxy - Advanced HTTP/HTTPS Proxy Server
+# GoProxy - Advanced HTTP/HTTPS/SOCKS5 Proxy Server
 
-GoProxy is a sophisticated HTTP/HTTPS proxy server written in Go that provides intelligent routing, caching, and system tray integration. It supports multiple proxy types, rule-based routing, hot-reloadable configuration.
+GoProxy is a sophisticated proxy server written in Go that provides intelligent routing, caching, and system tray integration. It supports HTTP, HTTPS, and SOCKS5 protocols with rule-based routing and hot-reloadable configuration.
 
 ## Features
 
-- **Multi-Protocol Support**: HTTP, HTTPS, SOCKS5 proxy support with authentication
+- **Multi-Protocol Support**: HTTP, HTTPS, and SOCKS5 proxy support with authentication
+- **Dual Server Mode**: Simultaneous HTTP/HTTPS and SOCKS5 server support
 - **Rule-Based Routing**: Advanced pattern matching for IPs, hosts, and URLs
 - **Hot Reload**: Configuration reload without restart (SIGHUP, tray menu, or periodic)
 - **System Tray Integration**: Native system tray support (Windows/macOS)
@@ -75,7 +76,8 @@ proxies:
   direct: ""
   block: "#"
 
-listenAddr: ":8080"
+listenHttpAddr: ":8080"
+listenSocksAddr: ":1080"
 logLevel: "info"
 logFile: "goProxy.log"
 maxLogSize: 10
@@ -116,7 +118,8 @@ rules:
 #### Global Settings
 - `defaultProxy`: Default proxy to use when no rules match
 - `proxies`: Map of proxy definitions
-- `listenAddr`: Address and port to listen on (e.g., ":8080")
+- `listenHttpAddr`: HTTP/HTTPS proxy server address and port (e.g., ":8080")
+- `listenSocksAddr`: SOCKS5 server address and port (e.g., ":1080")
 - `logLevel`: Logging level (debug, info, warn, error, none)
 - `logFile`: Log file path (relative to config directory)
 - `maxLogSize`: Maximum log file size in MB before rotation
@@ -254,9 +257,10 @@ Example:
 
 ### Core Components
 
-- **Main Application** ([`main.go`](main.go)): Orchestrates the proxy server, system tray, and auto-reload functionality
+- **Main Application** ([`main.go`](main.go)): Orchestrates the proxy servers, system tray, and auto-reload functionality
 - **Configuration Management** ([`config/`](config/)): YAML config parsing, external rule loading, and management
-- **Proxy Handler** ([`handler/`](handler/)): HTTP request handling and routing logic with support for HTTP, HTTPS, and SOCKS5
+- **Proxy Handler** ([`handler/`](handler/)): HTTP/HTTPS request handling and routing logic
+- **SOCKS5 Handler** ([`handler/socks.go`](handler/socks.go)): SOCKS5 protocol implementation
 - **Caching System** ([`cache/`](cache/)): DNS, pattern, and CIDR caching for performance
 - **Logging System** ([`logging/`](logging/)): Configurable logging infrastructure with file rotation
 - **System Tray** ([`tray/`](tray/)): Platform-specific system tray integration (Windows/macOS)
@@ -266,6 +270,7 @@ Example:
 
 - **HTTP/HTTPS Support**: Full HTTP proxy functionality with CONNECT method support
 - **SOCKS5 Support**: SOCKS5 proxy connections with authentication
+- **Dual Server Mode**: Simultaneous HTTP/HTTPS and SOCKS5 server operation
 - **Connection Pooling**: Efficient connection reuse
 - **Authentication**: Support for proxy authentication (Basic Auth for HTTP, User/Pass for SOCKS5)
 - **Blocking**: Configurable request blocking with proper HTTP error responses
@@ -274,11 +279,11 @@ Example:
 
 ### Dependencies
 
-- [`github.com/elazarl/goproxy`](https://github.com/elazarl/goproxy): Core proxy functionality
+- [`github.com/elazarl/goproxy`](https://github.com/elazarl/goproxy): Core HTTP/HTTPS proxy functionality
 - [`github.com/getlantern/systray`](https://github.com/getlantern/systray): System tray integration
 - [`github.com/gobwas/glob`](https://github.com/gobwas/glob): Pattern matching
 - [`github.com/hashicorp/golang-lru/v2`](https://github.com/hashicorp/golang-lru): LRU caching
-- [`golang.org/x/net/proxy`](https://pkg.go.dev/golang.org/x/net/proxy): SOCKS5 proxy support
+- [`github.com/txthinking/socks5`](https://github.com/txthinking/socks5): SOCKS5 server implementation
 - [`gopkg.in/yaml.v3`](https://github.com/go-yaml/yaml): YAML configuration parsing
 - [`gopkg.in/natefinch/lumberjack.v2`](https://github.com/natefinch/lumberjack): Log file rotation
 - [`github.com/skratchdot/open-golang`](https://github.com/skratchdot/open-golang): Opening config directory
