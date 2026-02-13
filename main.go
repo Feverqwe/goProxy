@@ -51,6 +51,7 @@ func main() {
 
 	startServer := func(addr string) {
 		if currentHttpServer != nil {
+			logger.Info("Stopping old HTTP server...")
 			if err := currentHttpServer.Close(); err != nil {
 				logger.Error("Error closing old server: %v", err)
 			}
