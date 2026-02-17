@@ -6,10 +6,11 @@ import (
 )
 
 type TickerManager struct {
-	ticker     *time.Ticker
 	stopChan   chan struct{}
 	mutex      sync.Mutex
 	reloadChan chan struct{}
+	interval   time.Duration
+	lastTick   int64
 }
 
 func NewTickerManager() *TickerManager {
@@ -26,11 +27,6 @@ func (tm *TickerManager) StopOldTicker() {
 		close(tm.stopChan)
 		tm.stopChan = nil
 	}
-
-	if tm.ticker != nil {
-		tm.ticker.Stop()
-		tm.ticker = nil
-	}
 }
 
 func (tm *TickerManager) StartTicker(hours int) {
@@ -42,22 +38,33 @@ func (tm *TickerManager) StartTicker(hours int) {
 
 	tm.mutex.Lock()
 	tm.stopChan = make(chan struct{})
-	tm.ticker = time.NewTicker(time.Duration(hours) * time.Hour)
+	tm.interval = time.Duration(hours) * time.Hour
+	tm.lastTick = time.Now().Unix()
 	currentStopChan := tm.stopChan
-	currentTicker := tm.ticker
+	currentInterval := tm.interval
 	tm.mutex.Unlock()
+
+	checkTicker := time.NewTicker(10 * time.Minute)
+	defer checkTicker.Stop()
 
 	go func() {
 		for {
 			select {
-			case <-currentTicker.C:
-				select {
-				case tm.reloadChan <- struct{}{}:
-				default:
-					// Если релоад уже в очереди, пропускаем
+			case <-checkTicker.C:
+				tm.mutex.Lock()
+				currentTime := time.Now().Unix()
+				elapsed := time.Duration(currentTime-tm.lastTick) * time.Second
+				if elapsed >= currentInterval {
+					select {
+					case tm.reloadChan <- struct{}{}:
+					default:
+
+					}
+					tm.lastTick = currentTime
 				}
+				tm.mutex.Unlock()
 			case <-currentStopChan:
-				return // Выход из горутины при остановке тикера
+				return
 			}
 		}
 	}()
