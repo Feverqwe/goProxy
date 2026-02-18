@@ -40,30 +40,28 @@ func (tm *TickerManager) StartTicker(hours int) {
 	tm.stopChan = make(chan struct{})
 	tm.interval = time.Duration(hours) * time.Hour
 	tm.lastTick = time.Now().Unix()
-	currentStopChan := tm.stopChan
-	currentInterval := tm.interval
+
+	stopChan := tm.stopChan
+	interval := tm.interval
 	tm.mutex.Unlock()
 
-	checkTicker := time.NewTicker(10 * time.Minute)
-	defer checkTicker.Stop()
-
 	go func() {
+		// Используем интервал напрямую вместо проверки каждые 10 минут
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
 		for {
 			select {
-			case <-checkTicker.C:
-				tm.mutex.Lock()
-				currentTime := time.Now().Unix()
-				elapsed := time.Duration(currentTime-tm.lastTick) * time.Second
-				if elapsed >= currentInterval {
-					select {
-					case tm.reloadChan <- struct{}{}:
-					default:
-
-					}
-					tm.lastTick = currentTime
+			case <-ticker.C:
+				select {
+				case tm.reloadChan <- struct{}{}:
+				default:
+					// канал полон, пропускаем
 				}
+				tm.mutex.Lock()
+				tm.lastTick = time.Now().Unix()
 				tm.mutex.Unlock()
-			case <-currentStopChan:
+			case <-stopChan:
 				return
 			}
 		}
