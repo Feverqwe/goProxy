@@ -1,6 +1,7 @@
 package ticker
 
 import (
+	"log"
 	"sync"
 	"time"
 )
@@ -9,8 +10,6 @@ type TickerManager struct {
 	stopChan   chan struct{}
 	mutex      sync.Mutex
 	reloadChan chan struct{}
-	interval   time.Duration
-	lastTick   int64
 }
 
 func NewTickerManager() *TickerManager {
@@ -36,32 +35,29 @@ func (tm *TickerManager) StartTicker(hours int) {
 		return
 	}
 
-	tm.mutex.Lock()
-	tm.stopChan = make(chan struct{})
-	tm.interval = time.Duration(hours) * time.Hour
-	tm.lastTick = time.Now().Unix()
+	currentStopChan := make(chan struct{})
+	lastTick := time.Now().Unix()
+	currentInterval := time.Duration(hours) * time.Hour
 
-	stopChan := tm.stopChan
-	interval := tm.interval
+	tm.mutex.Lock()
+	tm.stopChan = currentStopChan
 	tm.mutex.Unlock()
 
 	go func() {
-		// Используем интервал напрямую вместо проверки каждые 10 минут
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
+		checkTicker := time.NewTicker(10 * time.Minute)
+		defer checkTicker.Stop()
 
 		for {
 			select {
-			case <-ticker.C:
-				select {
-				case tm.reloadChan <- struct{}{}:
-				default:
-					// канал полон, пропускаем
+			case <-checkTicker.C:
+				log.Println("tick")
+				currentTime := time.Now().Unix()
+				elapsed := time.Duration(currentTime-lastTick) * time.Second
+				if elapsed >= currentInterval {
+					lastTick = currentTime
+					tm.reloadChan <- struct{}{}
 				}
-				tm.mutex.Lock()
-				tm.lastTick = time.Now().Unix()
-				tm.mutex.Unlock()
-			case <-stopChan:
+			case <-currentStopChan:
 				return
 			}
 		}
