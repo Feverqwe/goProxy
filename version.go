@@ -5,7 +5,7 @@ import (
 	"runtime/debug"
 )
 
-var Version = "1.6.5"
+var Version = "1.7.0"
 
 var (
 	Commit    = "unknown"
