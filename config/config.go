@@ -94,6 +94,8 @@ func (c *ProxyConfig) afterLoad(httpClientFunc HTTPClientFunc, cacheOnly bool) {
 
 	configDir := filepath.Dir(c.configPath)
 
+	c.autoDetectInterfaceIPs()
+
 	c.preParseRuleLists(configDir, cacheOnly, httpClientFunc)
 
 	c.cache.PrecompilePatterns(c.GetAllHosts(), c.GetAllIps())

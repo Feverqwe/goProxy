@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"goProxy/logging"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,5 +132,50 @@ func OpenConfigDirectory(configPath string, logger *logging.Logger) {
 
 	if err := open.Run(configDir); err != nil {
 		logger.Error("Error opening config directory: %v", err)
+	}
+}
+
+func (c *ProxyConfig) autoDetectInterfaceIPs() {
+	if c.ExternalIf == "" {
+		return
+	}
+
+	iface, err := net.InterfaceByName(c.ExternalIf)
+	if err != nil {
+		c.logger.Error("Failed to find interface %s: %v", c.ExternalIf, err)
+		return
+	}
+
+	addrs, err := iface.Addrs()
+	if err != nil {
+		c.logger.Error("Failed to get addresses for interface %s: %v", c.ExternalIf, err)
+		return
+	}
+
+	for _, addr := range addrs {
+		var ip net.IP
+		switch v := addr.(type) {
+		case *net.IPNet:
+			ip = v.IP
+		case *net.IPAddr:
+			ip = v.IP
+		}
+
+		if ip == nil || ip.IsLoopback() {
+			continue
+		}
+
+		// Если ExternalIp4/6 не заданы вручную, берем их с интерфейса
+		if ip.To4() != nil {
+			if c.ExternalIp4 == "" {
+				c.ExternalIp4 = ip.String()
+				c.logger.Debug("Auto-detected IPv4 for %s: %s", c.ExternalIf, c.ExternalIp4)
+			}
+		} else if ip.To16() != nil && ip.IsGlobalUnicast() {
+			if c.ExternalIp6 == "" {
+				c.ExternalIp6 = ip.String()
+				c.logger.Debug("Auto-detected IPv6 for %s: %s", c.ExternalIf, c.ExternalIp6)
+			}
+		}
 	}
 }

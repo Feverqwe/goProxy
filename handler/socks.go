@@ -141,33 +141,43 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 		// Logic for new UDP session
 		if proxyURL == "" {
 			s.logger.Info("SOCKS5 UDP Direct: %s (rule: %s)", target, decision.RuleName)
-			return s.defaultHandler.UDPHandle(server, addr, d) // Fallback to local server relay
-		}
 
-		s.logger.Info("SOCKS5 UDP Proxy: %s via %s (rule: %s)", target, decision.Proxy, decision.RuleName)
+			dialer := net.Dialer{
+				LocalAddr: s.getLocalUDPAddr(targetHost),
+				Timeout:   10 * time.Second,
+			}
 
-		parsedURL, err := url.Parse(proxyURL)
-		if err != nil || (parsedURL.Scheme != "socks5" && parsedURL.Scheme != "socks5h") {
-			s.logger.Warn("UDP Associate only supports SOCKS5 upstream. Falling back to direct for %s", target)
-			return s.defaultHandler.UDPHandle(server, addr, d)
-		}
+			upstreamConn, err = dialer.Dial("udp", targetHost)
+			if err != nil {
+				s.logger.Error("SOCKS5 UDP Direct Dial Error: %v", err)
+				return err
+			}
+		} else {
+			s.logger.Info("SOCKS5 UDP Proxy: %s via %s (rule: %s)", target, decision.Proxy, decision.RuleName)
 
-		user, pass := "", ""
-		if parsedURL.User != nil {
-			user = parsedURL.User.Username()
-			pass, _ = parsedURL.User.Password()
-		}
+			parsedURL, err := url.Parse(proxyURL)
+			if err != nil || (parsedURL.Scheme != "socks5" && parsedURL.Scheme != "socks5h") {
+				s.logger.Warn("UDP Associate only supports SOCKS5 upstream. Falling back to direct for %s", target)
+				return s.defaultHandler.UDPHandle(server, addr, d)
+			}
 
-		client, err := socks5.NewClient(parsedURL.Host, user, pass, 30, 30)
-		if err != nil {
-			s.logger.Error("SOCKS5 UDP Client Error: %v", err)
-			return err
-		}
+			user, pass := "", ""
+			if parsedURL.User != nil {
+				user = parsedURL.User.Username()
+				pass, _ = parsedURL.User.Password()
+			}
 
-		upstreamConn, err = client.Dial("udp", targetHost)
-		if err != nil {
-			s.logger.Error("SOCKS5 UDP Upstream Dial Error: %v", err)
-			return err
+			client, err := socks5.NewClient(parsedURL.Host, user, pass, 30, 30)
+			if err != nil {
+				s.logger.Error("SOCKS5 UDP Client Error: %v", err)
+				return err
+			}
+
+			upstreamConn, err = client.Dial("udp", targetHost)
+			if err != nil {
+				s.logger.Error("SOCKS5 UDP Upstream Dial Error: %v", err)
+				return err
+			}
 		}
 
 		s.udpManager.Set(clientKey, upstreamConn)
@@ -215,4 +225,32 @@ func (s *SocksHandler) listenUpstreamUDP(server *socks5.Server, clientAddr *net.
 			return
 		}
 	}
+}
+
+func (s *SocksHandler) getLocalUDPAddr(target string) *net.UDPAddr {
+	s.ph.mu.RLock()
+	extIp4 := s.ph.decision.config.ExternalIp4
+	extIp6 := s.ph.decision.config.ExternalIp6
+	s.ph.mu.RUnlock()
+
+	if extIp4 == "" && extIp6 == "" {
+		host, _, _ := net.SplitHostPort(target)
+		ips, err := s.ph.decision.cache.ResolveHost(host)
+
+		if err == nil && len(ips) > 0 {
+			targetIP := ips[0]
+			var sourceIP string
+			if targetIP.To4() != nil {
+				sourceIP = extIp4
+			} else {
+				sourceIP = extIp6
+			}
+
+			if sourceIP != "" {
+				return &net.UDPAddr{IP: net.ParseIP(sourceIP), Port: 0}
+			}
+		}
+	}
+
+	return nil
 }

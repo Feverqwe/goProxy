@@ -89,6 +89,40 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 	}
 
 	if proxyURL == "" {
+		p.mu.RLock()
+		extIp4 := p.decision.config.ExternalIp4
+		extIp6 := p.decision.config.ExternalIp6
+		p.mu.RUnlock()
+
+		if extIp4 == "" && extIp6 == "" {
+			host, _, _ := net.SplitHostPort(addr)
+			// Используем ваш кеш, чтобы не делать лишних DNS-запросов
+			ips, err := p.decision.cache.ResolveHost(host)
+
+			if err == nil && len(ips) > 0 {
+				targetIP := ips[0] // Берем первый отрезолвленный IP
+
+				var sourceIP string
+				// Определяем, какой внешний IP использовать
+				if targetIP.To4() != nil {
+					sourceIP = extIp4
+				} else {
+					sourceIP = extIp6
+				}
+
+				if sourceIP != "" {
+					// Привязываемся к конкретному IP, порт оставляем 0 (выберет ОС)
+					localAddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(sourceIP, "0"))
+					if err == nil {
+						dialer.LocalAddr = localAddr
+						p.logger.Debug("Direct connection to %s bound to source IP: %s", addr, sourceIP)
+					} else {
+						p.logger.Error("Failed to resolve LocalAddr %s: %v", sourceIP, err)
+					}
+				}
+			}
+		}
+
 		return dialer.DialContext(ctx, network, addr)
 	}
 

@@ -46,6 +46,9 @@ type ProxyConfig struct {
 	MaxLogFiles     int               `yaml:"maxLogFiles,omitempty"`
 	AutoReloadHours int               `yaml:"autoReloadHours,omitempty"`
 	Rules           []RuleConfig      `yaml:"rules"`
+	ExternalIp4     string            `yaml:"externalIp4"`
+	ExternalIp6     string            `yaml:"externalIp6"`
+	ExternalIf      string            `yaml:"externalIf"`
 
 	logLevelInt int
 	cache       *cache.CacheManager
