@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"syscall"
 	"time"
 
 	"goProxy/cache"
@@ -121,6 +122,7 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 	targetHost := d.Address()
 	target, _, _ := net.SplitHostPort(targetHost)
 	clientKey := addr.String() + "->" + targetHost
+	extIf := s.ph.decision.config.ExternalIf
 
 	proxyURL, decision, err := s.ph.decision.GetProxyForHost(target)
 	if err != nil {
@@ -141,33 +143,56 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 		// Logic for new UDP session
 		if proxyURL == "" {
 			s.logger.Info("SOCKS5 UDP Direct: %s (rule: %s)", target, decision.RuleName)
-			return s.defaultHandler.UDPHandle(server, addr, d) // Fallback to local server relay
-		}
 
-		s.logger.Info("SOCKS5 UDP Proxy: %s via %s (rule: %s)", target, decision.Proxy, decision.RuleName)
+			if extIf == "" {
+				return s.defaultHandler.UDPHandle(server, addr, d)
+			}
 
-		parsedURL, err := url.Parse(proxyURL)
-		if err != nil || (parsedURL.Scheme != "socks5" && parsedURL.Scheme != "socks5h") {
-			s.logger.Warn("UDP Associate only supports SOCKS5 upstream. Falling back to direct for %s", target)
-			return s.defaultHandler.UDPHandle(server, addr, d)
-		}
+			dialer := &net.Dialer{
+				Timeout: 30 * time.Second,
+				Control: func(network, address string, c syscall.RawConn) error {
+					return c.Control(func(fd uintptr) {
+						err := BindToInterface(fd, extIf)
+						if err != nil {
+							s.logger.Error("Failed to bind to interface %s: %v", extIf, err)
+						} else {
+							s.logger.Debug("Dialer bound to interface: %s", extIf)
+						}
+					})
+				},
+			}
 
-		user, pass := "", ""
-		if parsedURL.User != nil {
-			user = parsedURL.User.Username()
-			pass, _ = parsedURL.User.Password()
-		}
+			upstreamConn, err = dialer.Dial("udp", targetHost)
+			if err != nil {
+				s.logger.Error("SOCKS5 UDP Direct Dial Error (if: %s): %v", extIf, err)
+				return err
+			}
+		} else {
+			s.logger.Info("SOCKS5 UDP Proxy: %s via %s (rule: %s)", target, decision.Proxy, decision.RuleName)
 
-		client, err := socks5.NewClient(parsedURL.Host, user, pass, 30, 30)
-		if err != nil {
-			s.logger.Error("SOCKS5 UDP Client Error: %v", err)
-			return err
-		}
+			parsedURL, err := url.Parse(proxyURL)
+			if err != nil || (parsedURL.Scheme != "socks5" && parsedURL.Scheme != "socks5h") {
+				s.logger.Warn("UDP Associate only supports SOCKS5 upstream. Falling back to direct for %s", target)
+				return s.defaultHandler.UDPHandle(server, addr, d)
+			}
 
-		upstreamConn, err = client.Dial("udp", targetHost)
-		if err != nil {
-			s.logger.Error("SOCKS5 UDP Upstream Dial Error: %v", err)
-			return err
+			user, pass := "", ""
+			if parsedURL.User != nil {
+				user = parsedURL.User.Username()
+				pass, _ = parsedURL.User.Password()
+			}
+
+			client, err := socks5.NewClient(parsedURL.Host, user, pass, 30, 30)
+			if err != nil {
+				s.logger.Error("SOCKS5 UDP Client Error: %v", err)
+				return err
+			}
+
+			upstreamConn, err = client.Dial("udp", targetHost)
+			if err != nil {
+				s.logger.Error("SOCKS5 UDP Upstream Dial Error: %v", err)
+				return err
+			}
 		}
 
 		s.udpManager.Set(clientKey, upstreamConn)
