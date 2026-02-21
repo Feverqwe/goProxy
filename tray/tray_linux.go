@@ -32,7 +32,7 @@ func NewTrayManager() *TrayManager {
 }
 
 func (tm *TrayManager) Start() {
-
+	<-tm.quitChan
 }
 
 func (tm *TrayManager) GetQuitChan() <-chan struct{} {
