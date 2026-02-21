@@ -9,10 +9,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/elazarl/goproxy"
@@ -88,23 +86,6 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,
-	}
-
-	p.mu.RLock()
-	extIf := p.decision.config.ExternalIf
-	p.mu.RUnlock()
-
-	if proxyURL == "" && extIf != "" && runtime.GOOS == "linux" {
-		dialer.Control = func(network, address string, c syscall.RawConn) error {
-			return c.Control(func(fd uintptr) {
-				err := BindToInterface(fd, extIf)
-				if err != nil {
-					p.logger.Error("Failed to bind to interface %s: %v", extIf, err)
-				} else {
-					p.logger.Debug("Dialer bound to interface: %s", extIf)
-				}
-			})
-		}
 	}
 
 	if proxyURL == "" {

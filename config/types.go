@@ -37,7 +37,6 @@ type RuleConfig struct {
 
 type ProxyConfig struct {
 	DefaultProxy    string            `yaml:"defaultProxy"`
-	ExternalIf      string            `yaml:"externalIf,omitempty"`
 	Proxies         map[string]string `yaml:"proxies"`
 	ListenHttpAddr  string            `yaml:"listenHttpAddr"`
 	ListenSocksAddr string            `yaml:"listenSocksAddr"`

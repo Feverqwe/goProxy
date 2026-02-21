@@ -13,7 +13,6 @@ import (
 func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientFunc HTTPClientFunc, cacheOnly bool, logger *logging.Logger) (*ProxyConfig, error) {
 	config := &ProxyConfig{
 		DefaultProxy: "direct",
-		ExternalIf:   "",
 		Proxies: map[string]string{
 			"socks5": "socks5://localhost:1080",
 			"http":   "http://localhost:8081",

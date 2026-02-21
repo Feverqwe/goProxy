@@ -4,4 +4,4 @@ set -e
 
 source "$(dirname $0)/_variables.sh"
 
-npx repomix@latest
+npx repomix
