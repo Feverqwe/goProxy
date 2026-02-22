@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"sync"
 	"time"
 
 	"goProxy/cache"
@@ -13,6 +14,12 @@ import (
 
 	"github.com/txthinking/socks5"
 )
+
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		return make([]byte, 32*1024)
+	},
+}
 
 type SocksHandler struct {
 	ph             *ProxyHandler
@@ -107,9 +114,24 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 		return err
 	}
 
-	errCh := make(chan error, 2)
-	go func() { _, err := io.Copy(remote, conn); errCh <- err }()
-	go func() { _, err := io.Copy(conn, remote); errCh <- err }()
+	errCh := make(chan error, 1)
+
+	closeBoth := func() {
+		remote.Close()
+		conn.Close()
+	}
+
+	copyDir := func(dst io.Writer, src io.Reader) {
+		buf := bufferPool.Get().([]byte)
+		defer bufferPool.Put(buf)
+
+		_, err := io.CopyBuffer(dst, src, buf)
+		errCh <- err
+		closeBoth()
+	}
+
+	go copyDir(remote, conn)
+	go copyDir(conn, remote)
 
 	return <-errCh
 }
