@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"syscall"
 	"time"
 
 	"goProxy/cache"
@@ -142,9 +143,35 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 		if proxyURL == "" {
 			s.logger.Info("SOCKS5 UDP Direct: %s (rule: %s)", target, decision.RuleName)
 
+			s.ph.mu.RLock()
+			extIf := s.ph.decision.config.ExternalIf
+			extIp4 := s.ph.decision.config.ExternalIp4
+			extIp6 := s.ph.decision.config.ExternalIp6
+			s.ph.mu.RUnlock()
+
+			if extIf == "" && extIp4 == "" && extIp6 == "" {
+				return s.defaultHandler.UDPHandle(server, addr, d)
+			}
+
 			dialer := net.Dialer{
-				LocalAddr: s.getLocalUDPAddr(targetHost),
-				Timeout:   10 * time.Second,
+				Timeout: 10 * time.Second,
+			}
+
+			if extIp4 != "" || extIp6 != "" {
+				dialer.LocalAddr = s.getLocalUDPAddr(extIp4, extIp6, targetHost)
+			}
+
+			if extIf != "" {
+				dialer.Control = func(network, address string, c syscall.RawConn) error {
+					return c.Control(func(fd uintptr) {
+						err := BindToInterface(fd, extIf)
+						if err != nil {
+							s.logger.Error("Failed to bind to interface %s: %v", extIf, err)
+						} else {
+							s.logger.Debug("Dialer bound to interface: %s", extIf)
+						}
+					})
+				}
 			}
 
 			upstreamConn, err = dialer.Dial("udp", targetHost)
@@ -227,28 +254,21 @@ func (s *SocksHandler) listenUpstreamUDP(server *socks5.Server, clientAddr *net.
 	}
 }
 
-func (s *SocksHandler) getLocalUDPAddr(target string) *net.UDPAddr {
-	s.ph.mu.RLock()
-	extIp4 := s.ph.decision.config.ExternalIp4
-	extIp6 := s.ph.decision.config.ExternalIp6
-	s.ph.mu.RUnlock()
+func (s *SocksHandler) getLocalUDPAddr(extIp4 string, extIp6 string, target string) *net.UDPAddr {
+	host, _, _ := net.SplitHostPort(target)
+	ips, err := s.ph.decision.cache.ResolveHost(host)
 
-	if extIp4 == "" && extIp6 == "" {
-		host, _, _ := net.SplitHostPort(target)
-		ips, err := s.ph.decision.cache.ResolveHost(host)
+	if err == nil && len(ips) > 0 {
+		targetIP := ips[0]
+		var sourceIP string
+		if targetIP.To4() != nil {
+			sourceIP = extIp4
+		} else {
+			sourceIP = extIp6
+		}
 
-		if err == nil && len(ips) > 0 {
-			targetIP := ips[0]
-			var sourceIP string
-			if targetIP.To4() != nil {
-				sourceIP = extIp4
-			} else {
-				sourceIP = extIp6
-			}
-
-			if sourceIP != "" {
-				return &net.UDPAddr{IP: net.ParseIP(sourceIP), Port: 0}
-			}
+		if sourceIP != "" {
+			return &net.UDPAddr{IP: net.ParseIP(sourceIP), Port: 0}
 		}
 	}
 

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/elazarl/goproxy"
@@ -90,11 +91,12 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 
 	if proxyURL == "" {
 		p.mu.RLock()
+		extIf := p.decision.config.ExternalIf
 		extIp4 := p.decision.config.ExternalIp4
 		extIp6 := p.decision.config.ExternalIp6
 		p.mu.RUnlock()
 
-		if extIp4 == "" && extIp6 == "" {
+		if extIp4 != "" || extIp6 != "" {
 			host, _, _ := net.SplitHostPort(addr)
 			// Используем ваш кеш, чтобы не делать лишних DNS-запросов
 			ips, err := p.decision.cache.ResolveHost(host)
@@ -120,6 +122,19 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 						p.logger.Error("Failed to resolve LocalAddr %s: %v", sourceIP, err)
 					}
 				}
+			}
+		}
+
+		if extIf != "" {
+			dialer.Control = func(network, address string, c syscall.RawConn) error {
+				return c.Control(func(fd uintptr) {
+					err := BindToInterface(fd, extIf)
+					if err != nil {
+						p.logger.Error("Failed to bind to interface %s: %v", extIf, err)
+					} else {
+						p.logger.Debug("Dialer bound to interface: %s", extIf)
+					}
+				})
 			}
 		}
 
