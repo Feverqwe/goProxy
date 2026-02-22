@@ -99,13 +99,20 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 			ips, err := p.decision.cache.ResolveHost(host)
 
 			if err == nil && len(ips) > 0 {
-				targetIP := ips[0]
+				var hasV4, hasV6 bool
+				for _, ip := range ips {
+					if ip.To4() != nil {
+						hasV4 = true
+					} else {
+						hasV6 = true
+					}
+				}
 
 				var sourceIP string
-				if targetIP.To4() != nil {
-					sourceIP = extIp4
-				} else {
+				if hasV6 && extIp6 != "" {
 					sourceIP = extIp6
+				} else if hasV4 && extIp4 != "" {
+					sourceIP = extIp4
 				}
 
 				if sourceIP != "" {
