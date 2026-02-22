@@ -165,7 +165,6 @@ func (c *ProxyConfig) autoDetectInterfaceIPs() {
 			continue
 		}
 
-		// Если ExternalIp4/6 не заданы вручную, берем их с интерфейса
 		if ip.To4() != nil {
 			if c.ExternalIp4 == "" {
 				c.ExternalIp4 = ip.String()

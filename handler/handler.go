@@ -96,14 +96,12 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 
 		if extIp4 != "" || extIp6 != "" {
 			host, _, _ := net.SplitHostPort(addr)
-			// Используем ваш кеш, чтобы не делать лишних DNS-запросов
 			ips, err := p.decision.cache.ResolveHost(host)
 
 			if err == nil && len(ips) > 0 {
-				targetIP := ips[0] // Берем первый отрезолвленный IP
+				targetIP := ips[0]
 
 				var sourceIP string
-				// Определяем, какой внешний IP использовать
 				if targetIP.To4() != nil {
 					sourceIP = extIp4
 				} else {
@@ -111,7 +109,6 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 				}
 
 				if sourceIP != "" {
-					// Привязываемся к конкретному IP, порт оставляем 0 (выберет ОС)
 					localAddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(sourceIP, "0"))
 					if err == nil {
 						dialer.LocalAddr = localAddr

@@ -86,10 +86,9 @@ func main() {
 			return
 		}
 
-		// Create the handler using txthinking/socks5
 		sh := handler.NewSocksHandler(ph, currentConfig, cacheManager, logger)
 
-		socksServer, err := socks5.NewClassicServer(addr, "", "", "", 30, 30) // No auth, 30s timeouts
+		socksServer, err := socks5.NewClassicServer(addr, "", "", "", 30, 30)
 		if err != nil {
 			logger.Error("Failed to init SOCKS5 server: %v", err)
 			return

@@ -30,11 +30,9 @@ func NewSocksHandler(ph *ProxyHandler, config *config.ProxyConfig, cacheManager 
 	}
 }
 
-// TCPHandle handles SOCKS5 CONNECT requests
 func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *socks5.Request) error {
 	localAddr := conn.LocalAddr().(*net.TCPAddr)
 
-	// 3. Подготавливаем IP (v4 или v6)
 	var atyp byte
 	var ip []byte
 
@@ -46,10 +44,7 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 		ip = localAddr.IP.To16()
 	}
 
-	// If it's a UDP Associate request, we don't dial anything yet.
-	// We just tell the client we are ready to relay.
 	if r.Cmd == socks5.CmdUDP {
-		// 1. Get the actual UDP address the server is listening on
 		uaddr, err := net.ResolveUDPAddr("udp", server.UDPConn.LocalAddr().String())
 		if err != nil {
 			return err
@@ -63,7 +58,6 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 			return err
 		}
 
-		// 3. Keep TCP alive (as before)
 		b := make([]byte, 1)
 		for {
 			_, err := conn.Read(b)
@@ -84,7 +78,6 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 		return err
 	}
 
-	// 1. Rule-based blocking
 	if proxyURL == "#" {
 		s.logger.Info("SOCKS5 Blocked: %s (rule: %s)", target, decision.RuleName)
 		rep := socks5.NewReply(socks5.RepConnectionRefused, atyp, ip, []byte{0, 0})
@@ -92,14 +85,12 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 		return nil
 	}
 
-	// 2. Logging connection attempt
 	if proxyURL == "" {
 		s.logger.Info("SOCKS5 Direct: %s (rule: %s)", target, decision.RuleName)
 	} else {
 		s.logger.Info("SOCKS5 Proxy: %s via %s (rule: %s)", target, decision.Proxy, decision.RuleName)
 	}
 
-	// 3. Dialing target (Direct or via Upstream Proxy)
 	ctx := context.WithValue(context.Background(), proxyURLContextKey, proxyURL)
 	remote, err := s.ph.dialContext(ctx, "tcp", targetHost)
 	if err != nil {
@@ -110,14 +101,12 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 	}
 	defer remote.Close()
 
-	// 4. Success reply to client
 	rep := socks5.NewReply(socks5.RepSuccess, atyp, ip, []byte{0, 0})
 	if _, err := rep.WriteTo(conn); err != nil {
 		s.logger.Error("SOCKS5: Error writing reply: %v", err)
 		return err
 	}
 
-	// 5. Bidirectional data copy
 	errCh := make(chan error, 2)
 	go func() { _, err := io.Copy(remote, conn); errCh <- err }()
 	go func() { _, err := io.Copy(conn, remote); errCh <- err }()
@@ -125,7 +114,6 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 	return <-errCh
 }
 
-// UDPHandle handles SOCKS5 UDP ASSOCIATE data packets
 func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *socks5.Datagram) error {
 	targetHost := d.Address()
 	target, _, _ := net.SplitHostPort(targetHost)
@@ -137,17 +125,14 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 		return nil
 	}
 
-	// 1. Blocking
 	if proxyURL == "#" {
-		s.logger.Info("SOCKS5 UDP Blocked: %s", target) // Use debug for UDP to avoid log flooding
+		s.logger.Info("SOCKS5 UDP Blocked: %s", target)
 		return nil
 	}
 
-	// 2. Check for existing session in UDPSessionManager
 	upstreamConn, exists := s.udpManager.Get(clientKey)
 
 	if !exists {
-		// Logic for new UDP session
 		if proxyURL == "" {
 			s.logger.Info("SOCKS5 UDP Direct: %s (rule: %s)", target, decision.RuleName)
 
@@ -206,7 +191,6 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 		go s.listenUpstreamUDP(server, addr, targetHost, upstreamConn, clientKey)
 	}
 
-	// 3. Send packet to upstream
 	_, err = upstreamConn.Write(d.Data)
 	if err != nil {
 		s.logger.Debug("SOCKS5 UDP Write Error: %v", err)
@@ -230,16 +214,13 @@ func (s *SocksHandler) listenUpstreamUDP(server *socks5.Server, clientAddr *net.
 	}
 
 	for {
-		// If no data for 6 minutes, the goroutine dies and the manager will eventually cleanup
 		upstream.SetReadDeadline(time.Now().Add(6 * time.Minute))
 
 		n, err := upstream.Read(buf)
 		if err != nil {
-			// Expected when connection is closed or timed out
 			return
 		}
 
-		// Re-package the response from the target into a SOCKS5 Datagram
 		resp := socks5.NewDatagram(atyp, dstIP, dstPort, buf[:n])
 		_, err = server.UDPConn.WriteToUDP(resp.Bytes(), clientAddr)
 		if err != nil {
