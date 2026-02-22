@@ -33,6 +33,20 @@ func NewSocksHandler(ph *ProxyHandler, config *config.ProxyConfig, cacheManager 
 
 // TCPHandle handles SOCKS5 CONNECT requests
 func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *socks5.Request) error {
+	localAddr := conn.LocalAddr().(*net.TCPAddr)
+
+	// 3. Подготавливаем IP (v4 или v6)
+	var atyp byte
+	var ip []byte
+
+	if localAddr.IP.To4() != nil {
+		atyp = socks5.ATYPIPv4
+		ip = localAddr.IP.To4()
+	} else {
+		atyp = socks5.ATYPIPv6
+		ip = localAddr.IP.To16()
+	}
+
 	// If it's a UDP Associate request, we don't dial anything yet.
 	// We just tell the client we are ready to relay.
 	if r.Cmd == socks5.CmdUDP {
@@ -42,14 +56,9 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 			return err
 		}
 
-		// 2. Prepare the reply with the REAL IP and Port
-		// If listening on :1080 (0.0.0.0), we can send 0.0.0.0,
-		// but the Port MUST be correct.
 		port := []byte{byte(uaddr.Port >> 8), byte(uaddr.Port & 0xff)}
 
-		// We send 0,0,0,0 as the IP (meaning: "send to the same IP you connected to via TCP")
-		// but we MUST provide the correct Port.
-		rep := socks5.NewReply(socks5.RepSuccess, socks5.ATYPIPv4, []byte{0, 0, 0, 0}, port)
+		rep := socks5.NewReply(socks5.RepSuccess, atyp, ip, port)
 
 		if _, err := rep.WriteTo(conn); err != nil {
 			return err
@@ -71,7 +80,7 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 	proxyURL, decision, err := s.ph.decision.GetProxyForHost(target)
 	if err != nil {
 		s.logger.Error("SOCKS5 Decision Error: %v", err)
-		rep := socks5.NewReply(socks5.RepHostUnreachable, socks5.ATYPIPv4, []byte{0, 0, 0, 0}, []byte{0, 0})
+		rep := socks5.NewReply(socks5.RepHostUnreachable, atyp, ip, []byte{0, 0})
 		rep.WriteTo(conn)
 		return err
 	}
@@ -79,7 +88,7 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 	// 1. Rule-based blocking
 	if proxyURL == "#" {
 		s.logger.Info("SOCKS5 Blocked: %s (rule: %s)", target, decision.RuleName)
-		rep := socks5.NewReply(socks5.RepConnectionRefused, socks5.ATYPIPv4, []byte{0, 0, 0, 0}, []byte{0, 0})
+		rep := socks5.NewReply(socks5.RepConnectionRefused, atyp, ip, []byte{0, 0})
 		rep.WriteTo(conn)
 		return nil
 	}
@@ -96,14 +105,14 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 	remote, err := s.ph.dialContext(ctx, "tcp", targetHost)
 	if err != nil {
 		s.logger.Error("SOCKS5 Dial Error (%s): %v", target, err)
-		rep := socks5.NewReply(socks5.RepServerFailure, socks5.ATYPIPv4, []byte{0, 0, 0, 0}, []byte{0, 0})
+		rep := socks5.NewReply(socks5.RepServerFailure, atyp, ip, []byte{0, 0})
 		rep.WriteTo(conn)
 		return err
 	}
 	defer remote.Close()
 
 	// 4. Success reply to client
-	rep := socks5.NewReply(socks5.RepSuccess, socks5.ATYPIPv4, []byte{0, 0, 0, 0}, []byte{0, 0})
+	rep := socks5.NewReply(socks5.RepSuccess, atyp, ip, []byte{0, 0})
 	if _, err := rep.WriteTo(conn); err != nil {
 		s.logger.Error("SOCKS5: Error writing reply: %v", err)
 		return err
