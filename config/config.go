@@ -10,8 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientFunc HTTPClientFunc, cacheOnly bool, logger *logging.Logger) (*ProxyConfig, error) {
-	config := &ProxyConfig{
+func defaultConfig() *ProxyConfig {
+	return &ProxyConfig{
 		DefaultProxy: "direct",
 		Proxies: map[string]string{
 			"direct": "",
@@ -24,10 +24,11 @@ func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientF
 		MaxLogSize:      10,
 		MaxLogFiles:     5,
 		Rules:           []RuleConfig{},
-		cache:           cacheManager,
-		configPath:      configPath,
-		logger:          logger,
 	}
+}
+
+func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientFunc HTTPClientFunc, cacheOnly bool, logger *logging.Logger) (*ProxyConfig, error) {
+	var config *ProxyConfig
 
 	if _, err := os.Stat(configPath); err == nil {
 		file, err := os.Open(configPath)
@@ -40,10 +41,16 @@ func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientF
 			return nil, fmt.Errorf("error parsing config file: %v", err)
 		}
 	} else {
+		config = defaultConfig()
+
 		if err := saveDefaultConfig(configPath, config); err != nil {
 			return nil, fmt.Errorf("error creating default config file: %v", err)
 		}
 	}
+
+	config.cache = cacheManager
+	config.configPath = configPath
+	config.logger = logger
 
 	config.afterLoad(httpClientFunc, cacheOnly)
 
