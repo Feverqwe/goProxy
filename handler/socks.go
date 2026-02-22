@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"syscall"
 	"time"
 
 	"goProxy/cache"
@@ -153,7 +152,6 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 			s.logger.Info("SOCKS5 UDP Direct: %s (rule: %s)", target, decision.RuleName)
 
 			s.ph.mu.RLock()
-			bindExternalIf := s.ph.decision.config.BindExternalIf
 			extIf := s.ph.decision.config.ExternalIf
 			extIp4 := s.ph.decision.config.ExternalIp4
 			extIp6 := s.ph.decision.config.ExternalIp6
@@ -169,19 +167,6 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 
 			if extIp4 != "" || extIp6 != "" {
 				dialer.LocalAddr = s.getLocalUDPAddr(extIp4, extIp6, targetHost)
-			}
-
-			if bindExternalIf && extIf != "" {
-				dialer.Control = func(network, address string, c syscall.RawConn) error {
-					return c.Control(func(fd uintptr) {
-						err := BindToInterface(fd, extIf)
-						if err != nil {
-							s.logger.Error("Failed to bind to interface %s: %v", extIf, err)
-						} else {
-							s.logger.Debug("Dialer bound to interface: %s", extIf)
-						}
-					})
-				}
 			}
 
 			upstreamConn, err = dialer.Dial("udp", targetHost)
