@@ -144,6 +144,7 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 			s.logger.Info("SOCKS5 UDP Direct: %s (rule: %s)", target, decision.RuleName)
 
 			s.ph.mu.RLock()
+			bindExternalIf := s.ph.decision.config.BindExternalIf
 			extIf := s.ph.decision.config.ExternalIf
 			extIp4 := s.ph.decision.config.ExternalIp4
 			extIp6 := s.ph.decision.config.ExternalIp6
@@ -161,7 +162,7 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 				dialer.LocalAddr = s.getLocalUDPAddr(extIp4, extIp6, targetHost)
 			}
 
-			if extIf != "" {
+			if bindExternalIf && extIf != "" {
 				dialer.Control = func(network, address string, c syscall.RawConn) error {
 					return c.Control(func(fd uintptr) {
 						err := BindToInterface(fd, extIf)

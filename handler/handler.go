@@ -91,6 +91,7 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 
 	if proxyURL == "" {
 		p.mu.RLock()
+		bindExternalIf := p.decision.config.BindExternalIf
 		extIf := p.decision.config.ExternalIf
 		extIp4 := p.decision.config.ExternalIp4
 		extIp6 := p.decision.config.ExternalIp6
@@ -125,7 +126,7 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 			}
 		}
 
-		if extIf != "" {
+		if bindExternalIf && extIf != "" {
 			dialer.Control = func(network, address string, c syscall.RawConn) error {
 				return c.Control(func(fd uintptr) {
 					err := BindToInterface(fd, extIf)
