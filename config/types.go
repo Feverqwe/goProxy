@@ -31,7 +31,7 @@ type RuleBaseConfig struct {
 
 type RuleConfig struct {
 	RuleBaseConfig `yaml:",inline"`
-	Proxy          string `yaml:"proxy,omitempty"`
+	Proxy          string `yaml:"proxy"`
 	Not            bool   `yaml:"not,omitempty"`
 }
 
@@ -41,10 +41,10 @@ type ProxyConfig struct {
 	ListenHttpAddr  string            `yaml:"listenHttpAddr"`
 	ListenSocksAddr string            `yaml:"listenSocksAddr"`
 	LogLevel        string            `yaml:"logLevel"`
-	LogFile         string            `yaml:"logFile,omitempty"`
-	MaxLogSize      int               `yaml:"maxLogSize,omitempty"`
-	MaxLogFiles     int               `yaml:"maxLogFiles,omitempty"`
-	AutoReloadHours int               `yaml:"autoReloadHours,omitempty"`
+	LogFile         string            `yaml:"logFile"`
+	MaxLogSize      int               `yaml:"maxLogSize"`
+	MaxLogFiles     int               `yaml:"maxLogFiles"`
+	AutoReloadHours int               `yaml:"autoReloadHours"`
 	Rules           []RuleConfig      `yaml:"rules"`
 	ExternalIp4     string            `yaml:"externalIp4"`
 	ExternalIp6     string            `yaml:"externalIp6"`

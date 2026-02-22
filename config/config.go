@@ -14,8 +14,6 @@ func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientF
 	config := &ProxyConfig{
 		DefaultProxy: "direct",
 		Proxies: map[string]string{
-			"socks5": "socks5://localhost:1080",
-			"http":   "http://localhost:8081",
 			"direct": "",
 			"block":  "#",
 		},
@@ -25,41 +23,10 @@ func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientF
 		LogFile:         "goProxy.log",
 		MaxLogSize:      10,
 		MaxLogFiles:     5,
-		Rules: []RuleConfig{
-			{
-				RuleBaseConfig: RuleBaseConfig{
-					Name:  "Local Networks",
-					Ips:   "192.168.1.0/24 10.0.0.0/8 172.16.0.0/12",
-					Hosts: "localhost *.local *.example.com internal.company.com",
-				},
-				Proxy: "direct",
-			},
-			{
-				RuleBaseConfig: RuleBaseConfig{
-					Name:  "Inverted Proxy Rule",
-					Hosts: "*.google.com *.youtube.com",
-				},
-				Proxy: "socks5",
-				Not:   true,
-			},
-			{
-				RuleBaseConfig: RuleBaseConfig{
-					Name:  "External Domains",
-					Hosts: "*.external.com api.*.com",
-				},
-				Proxy: "http",
-			},
-			{
-				RuleBaseConfig: RuleBaseConfig{
-					Name:  "Blocked Domains",
-					Hosts: "*.malicious.com *.spam.com",
-				},
-				Proxy: "block",
-			},
-		},
-		cache:      cacheManager,
-		configPath: configPath,
-		logger:     logger,
+		Rules:           []RuleConfig{},
+		cache:           cacheManager,
+		configPath:      configPath,
+		logger:          logger,
 	}
 
 	if _, err := os.Stat(configPath); err == nil {
