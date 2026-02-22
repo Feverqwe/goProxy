@@ -15,7 +15,7 @@ import (
 type ProxyDecisionResult struct {
 	Proxy     string
 	RuleName  string
-	MatchType string // "host", "ip", or "default"
+	MatchType string // "host", "ip", "invert", or "default"
 }
 
 type ProxyDecision struct {
@@ -90,9 +90,7 @@ func (d *ProxyDecision) evaluateRules(host string) ProxyDecisionResult {
 		matchesRule := false
 		matchType := ""
 
-		ipRules := rule.GetParsedIps()
 		hostRules := rule.GetParsedHosts()
-
 		if len(hostRules) > 0 {
 			for _, hostRule := range hostRules {
 				if d.matchesGlob(hostRule, host) {
@@ -103,6 +101,7 @@ func (d *ProxyDecision) evaluateRules(host string) ProxyDecisionResult {
 			}
 		}
 
+		ipRules := rule.GetParsedIps()
 		if !matchesRule && len(ipRules) > 0 {
 			targetIP := net.ParseIP(host)
 			var targetIPs []net.IP
@@ -137,7 +136,7 @@ func (d *ProxyDecision) evaluateRules(host string) ProxyDecisionResult {
 							for _, rip := range ruleIPs {
 								for _, tip := range targetIPs {
 									if rip.Equal(tip) {
-										d.logger.Debug("Match: target %s (IP: %s) matches IP %s from rule domain %s", host, tip, rip, ipRule)
+										d.logger.Debug("Match: target %s (IP: %s) matches IP from rule %s", host, tip, ipRule)
 										matchesRule = true
 										matchType = "ip"
 										break
@@ -158,16 +157,18 @@ func (d *ProxyDecision) evaluateRules(host string) ProxyDecisionResult {
 			}
 		}
 
-		ruleName := rule.Name
-		if ruleName == "" {
-			ruleName = "unnamed rule"
-		}
-
 		if rule.Not {
 			matchesRule = !matchesRule
+			if matchesRule && matchType == "" {
+				matchType = "inverse"
+			}
 		}
 
 		if matchesRule {
+			ruleName := rule.Name
+			if ruleName == "" {
+				ruleName = "unnamed rule"
+			}
 			return ProxyDecisionResult{
 				Proxy:     rule.Proxy,
 				RuleName:  ruleName,

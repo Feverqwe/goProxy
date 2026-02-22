@@ -9,6 +9,7 @@ import (
 
 	"github.com/gobwas/glob"
 	lru "github.com/hashicorp/golang-lru/v2/expirable"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -19,6 +20,7 @@ type CacheManager struct {
 	globCache map[string]glob.Glob
 	cidrCache map[string]*net.IPNet
 	dnsCache  *lru.LRU[string, []net.IP]
+	dnsGroup  singleflight.Group
 	mu        sync.RWMutex
 }
 
@@ -90,14 +92,25 @@ func (c *CacheManager) ResolveHost(hostname string) ([]net.IP, error) {
 		return ips, nil
 	}
 
-	ips, err := net.LookupIP(hostname)
+	ipsInterface, err, _ := c.dnsGroup.Do(hostname, func() (interface{}, error) {
+		if ips, exists := c.dnsCache.Get(hostname); exists {
+			return ips, nil
+		}
+
+		ips, err := net.LookupIP(hostname)
+		if err != nil {
+			return nil, err
+		}
+
+		c.dnsCache.Add(hostname, ips)
+		return ips, nil
+	})
+
 	if err != nil {
 		return nil, err
 	}
 
-	c.dnsCache.Add(hostname, ips)
-
-	return ips, nil
+	return ipsInterface.([]net.IP), nil
 }
 
 func (c *CacheManager) PrecompilePatterns(hostPatterns, ipPatterns []string) {
