@@ -84,7 +84,7 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 	}
 
 	dialer := &net.Dialer{
-		Timeout:   30 * time.Second,
+		Timeout:   10 * time.Second,
 		KeepAlive: 30 * time.Second,
 	}
 
@@ -288,7 +288,7 @@ func (p *ProxyHandler) GetHTTPClient(targetURL string) (*http.Client, error) {
 	}
 
 	return &http.Client{
-		Timeout:   30 * time.Second,
+		Timeout:   10 * time.Second,
 		Transport: transport,
 	}, nil
 }

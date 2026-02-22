@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -97,7 +98,10 @@ func (c *CacheManager) ResolveHost(hostname string) ([]net.IP, error) {
 			return ips, nil
 		}
 
-		ips, err := net.LookupIP(hostname)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var resolver net.Resolver
+		ips, err := resolver.LookupIP(ctx, "ip", hostname)
 		if err != nil {
 			return nil, err
 		}

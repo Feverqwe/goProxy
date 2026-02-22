@@ -32,7 +32,7 @@ func NewSocksHandler(ph *ProxyHandler, config *config.ProxyConfig, cacheManager 
 	return &SocksHandler{
 		ph:             ph,
 		logger:         logger,
-		udpManager:     NewUDPSessionManager(5 * time.Minute),
+		udpManager:     NewUDPSessionManager(1 * time.Minute),
 		defaultHandler: &socks5.DefaultHandle{},
 	}
 }
@@ -236,7 +236,7 @@ func (s *SocksHandler) listenUpstreamUDP(server *socks5.Server, clientAddr *net.
 	}
 
 	for {
-		upstream.SetReadDeadline(time.Now().Add(6 * time.Minute))
+		upstream.SetReadDeadline(time.Now().Add(2 * time.Minute))
 
 		n, err := upstream.Read(buf)
 		if err != nil {
