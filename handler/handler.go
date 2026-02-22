@@ -95,34 +95,14 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 		p.mu.RUnlock()
 
 		if extIp4 != "" || extIp6 != "" {
-			host, _, _ := net.SplitHostPort(addr)
-			ips, err := p.decision.cache.ResolveHost(host)
-
-			if err == nil && len(ips) > 0 {
-				var hasV4, hasV6 bool
-				for _, ip := range ips {
-					if ip.To4() != nil {
-						hasV4 = true
-					} else {
-						hasV6 = true
-					}
-				}
-
-				var sourceIP string
-				if hasV6 && extIp6 != "" {
-					sourceIP = extIp6
-				} else if hasV4 && extIp4 != "" {
-					sourceIP = extIp4
-				}
-
-				if sourceIP != "" {
-					localAddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(sourceIP, "0"))
-					if err == nil {
-						dialer.LocalAddr = localAddr
-						p.logger.Debug("Direct connection to %s bound to source IP: %s", addr, sourceIP)
-					} else {
-						p.logger.Error("Failed to resolve LocalAddr %s: %v", sourceIP, err)
-					}
+			sourceIP, _ := p.getSourceIp(addr, extIp4, extIp6)
+			if sourceIP != "" {
+				localAddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(sourceIP, "0"))
+				if err == nil {
+					dialer.LocalAddr = localAddr
+					p.logger.Debug("Direct connection to %s bound to source IP: %s", addr, sourceIP)
+				} else {
+					p.logger.Error("Failed to resolve LocalAddr %s: %v", sourceIP, err)
 				}
 			}
 		}

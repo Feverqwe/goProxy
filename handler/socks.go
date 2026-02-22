@@ -173,7 +173,10 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 			}
 
 			if extIp4 != "" || extIp6 != "" {
-				dialer.LocalAddr = s.getLocalUDPAddr(extIp4, extIp6, targetHost)
+				sourceIP, _ := s.ph.getSourceIp(target, extIp4, extIp6)
+				if sourceIP != "" {
+					dialer.LocalAddr = &net.UDPAddr{IP: net.ParseIP(sourceIP), Port: 0}
+				}
 			}
 
 			upstreamConn, err = dialer.Dial("udp", targetHost)
@@ -250,25 +253,4 @@ func (s *SocksHandler) listenUpstreamUDP(server *socks5.Server, clientAddr *net.
 			return
 		}
 	}
-}
-
-func (s *SocksHandler) getLocalUDPAddr(extIp4 string, extIp6 string, target string) *net.UDPAddr {
-	host, _, _ := net.SplitHostPort(target)
-	ips, err := s.ph.decision.cache.ResolveHost(host)
-
-	if err == nil && len(ips) > 0 {
-		targetIP := ips[0]
-		var sourceIP string
-		if targetIP.To4() != nil {
-			sourceIP = extIp4
-		} else {
-			sourceIP = extIp6
-		}
-
-		if sourceIP != "" {
-			return &net.UDPAddr{IP: net.ParseIP(sourceIP), Port: 0}
-		}
-	}
-
-	return nil
 }
