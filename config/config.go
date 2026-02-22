@@ -28,7 +28,7 @@ func defaultConfig() *ProxyConfig {
 }
 
 func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientFunc HTTPClientFunc, cacheOnly bool, logger *logging.Logger) (*ProxyConfig, error) {
-	var config *ProxyConfig
+	config := &ProxyConfig{}
 
 	if _, err := os.Stat(configPath); err == nil {
 		file, err := os.Open(configPath)
