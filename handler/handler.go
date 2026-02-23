@@ -74,6 +74,10 @@ func (p *ProxyHandler) UpdateConfig(config *config.ProxyConfig, cache *cache.Cac
 }
 
 func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	p.mu.RLock()
+	currentDecision := p.decision
+	p.mu.RUnlock()
+
 	proxyURL, ok := ctx.Value(proxyURLContextKey).(string)
 	if !ok {
 		return nil, fmt.Errorf("proxy URL not found in context")
@@ -90,8 +94,8 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 
 	if proxyURL == "" {
 		p.mu.RLock()
-		extIp4 := p.decision.config.ExternalIp4
-		extIp6 := p.decision.config.ExternalIp6
+		extIp4 := currentDecision.config.ExternalIp4
+		extIp6 := currentDecision.config.ExternalIp6
 		p.mu.RUnlock()
 
 		if extIp4 != "" || extIp6 != "" {

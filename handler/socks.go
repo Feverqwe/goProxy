@@ -38,6 +38,10 @@ func NewSocksHandler(ph *ProxyHandler, config *config.ProxyConfig, cacheManager 
 }
 
 func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *socks5.Request) error {
+	s.ph.mu.RLock()
+	currentDecision := s.ph.decision
+	s.ph.mu.RUnlock()
+
 	localAddr := conn.LocalAddr().(*net.TCPAddr)
 
 	var atyp byte
@@ -77,7 +81,7 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 	targetHost := r.Address()
 	target, _, _ := net.SplitHostPort(targetHost)
 
-	proxyURL, decision, err := s.ph.decision.GetProxyForHost(target)
+	proxyURL, decision, err := currentDecision.GetProxyForHost(target)
 	if err != nil {
 		s.logger.Error("SOCKS5 Decision Error: %v", err)
 		rep := socks5.NewReply(socks5.RepHostUnreachable, atyp, ip, []byte{0, 0})
@@ -140,11 +144,15 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 }
 
 func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *socks5.Datagram) error {
+	s.ph.mu.RLock()
+	currentDecision := s.ph.decision
+	s.ph.mu.RUnlock()
+
 	targetHost := d.Address()
 	target, _, _ := net.SplitHostPort(targetHost)
 	clientKey := addr.String() + "->" + targetHost
 
-	proxyURL, decision, err := s.ph.decision.GetProxyForHost(target)
+	proxyURL, decision, err := currentDecision.GetProxyForHost(target)
 	if err != nil {
 		s.logger.Error("SOCKS5 UDP Decision Error: %v", err)
 		return nil
@@ -161,11 +169,9 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 		if proxyURL == "" {
 			s.logger.Info("SOCKS5 UDP Direct: %s (rule: %s)", target, decision.RuleName)
 
-			s.ph.mu.RLock()
-			extIf := s.ph.decision.config.ExternalIf
-			extIp4 := s.ph.decision.config.ExternalIp4
-			extIp6 := s.ph.decision.config.ExternalIp6
-			s.ph.mu.RUnlock()
+			extIf := currentDecision.config.ExternalIf
+			extIp4 := currentDecision.config.ExternalIp4
+			extIp6 := currentDecision.config.ExternalIp6
 
 			if extIf == "" && extIp4 == "" && extIp6 == "" {
 				return s.defaultHandler.UDPHandle(server, addr, d)
