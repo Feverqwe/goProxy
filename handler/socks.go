@@ -173,7 +173,7 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 			}
 
 			if extIp4 != "" || extIp6 != "" {
-				sourceIP, _ := s.ph.getSourceIp(target, extIp4, extIp6)
+				sourceIP, _ := s.ph.getSourceIp(targetHost, extIp4, extIp6)
 				if sourceIP != "" {
 					dialer.LocalAddr = &net.UDPAddr{IP: net.ParseIP(sourceIP), Port: 0}
 				}
