@@ -55,7 +55,10 @@ func (tm *TickerManager) StartTicker(hours int) {
 				elapsed := time.Duration(currentTime-lastTick) * time.Second
 				if elapsed >= currentInterval {
 					lastTick = currentTime
-					tm.reloadChan <- struct{}{}
+					select {
+					case tm.reloadChan <- struct{}{}:
+					default:
+					}
 				}
 			case <-currentStopChan:
 				return
