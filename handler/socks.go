@@ -114,11 +114,14 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 		return err
 	}
 
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2)
 
+	var once sync.Once
 	closeBoth := func() {
-		remote.Close()
-		conn.Close()
+		once.Do(func() {
+			remote.Close()
+			conn.Close()
+		})
 	}
 
 	copyDir := func(dst io.Writer, src io.Reader) {
