@@ -57,6 +57,10 @@ func NewProxyHandler(config *config.ProxyConfig, cacheManager *cache.CacheManage
 	}
 
 	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.MaxIdleConns = 500
+	tr.MaxIdleConnsPerHost = 100
+	tr.IdleConnTimeout = 90 * time.Second
+	tr.ResponseHeaderTimeout = 10 * time.Second
 	tr.DialContext = handler.dialContext
 	proxyServer.Tr = tr
 
