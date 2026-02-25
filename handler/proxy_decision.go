@@ -103,17 +103,12 @@ func (d *ProxyDecision) evaluateRules(host string) ProxyDecisionResult {
 
 		ipRules := rule.GetParsedIps()
 		if !matchesRule && len(ipRules) > 0 {
-			targetIP := net.ParseIP(host)
 			var targetIPs []net.IP
 
-			if targetIP != nil {
-				targetIPs = []net.IP{targetIP}
-			} else {
-				ips, err := d.cache.ResolveHost(host)
-				if err == nil {
-					targetIPs = ips
-					d.logger.Debug("Resolved target host %s to %v", host, ips)
-				}
+			ips, err := d.cache.ResolveHost(host)
+			if err == nil {
+				targetIPs = ips
+				d.logger.Debug("Resolved target host %s to %v", host, ips)
 			}
 
 			if len(targetIPs) > 0 {

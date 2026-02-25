@@ -89,6 +89,10 @@ func (c *CacheManager) GetCIDRNet(cidr string) (*net.IPNet, error) {
 }
 
 func (c *CacheManager) ResolveHost(hostname string) ([]net.IP, error) {
+	if ip := net.ParseIP(hostname); ip != nil {
+		return []net.IP{ip}, nil
+	}
+
 	if ips, exists := c.dnsCache.Get(hostname); exists {
 		return ips, nil
 	}
