@@ -9,23 +9,16 @@ func (s *ProxyHandler) getSourceIp(addr string, extIp4, extIp6 string) (string, 
 		return "", err
 	}
 
-	var sourceIP string
-	if len(ips) > 0 {
-		var hasV4, hasV6 bool
-		for _, ip := range ips {
-			if ip.To4() != nil {
-				hasV4 = true
-			} else {
-				hasV6 = true
-			}
-		}
+	for _, ip := range ips {
+		isV4 := ip.To4() != nil
 
-		if hasV6 && extIp6 != "" {
-			sourceIP = extIp6
-		} else if hasV4 && extIp4 != "" {
-			sourceIP = extIp4
+		if isV4 && extIp4 != "" {
+			return extIp4, nil
+		}
+		if !isV4 && extIp6 != "" {
+			return extIp6, nil
 		}
 	}
 
-	return sourceIP, nil
+	return "", nil
 }
