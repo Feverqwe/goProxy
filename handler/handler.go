@@ -104,7 +104,22 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 		p.mu.RUnlock()
 
 		if extIp4 != "" || extIp6 != "" {
-			sourceIP, _ := p.getSourceIp(addr, extDns, extIp4, extIp6)
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid address format %s: %w", addr, err)
+			}
+
+			ips, err := p.decision.cache.ResolveExternalHost(host, extDns, extIp4, extIp6, getSourceIpByIps)
+			if err != nil {
+				p.logger.Error("DNS Resolve Error for %s: %v", host, err)
+				return nil, err
+			}
+
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("no IP addresses found for host: %s", host)
+			}
+
+			sourceIP := getSourceIpByIps(ips, extIp4, extIp6)
 			if sourceIP != "" {
 				localAddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(sourceIP, "0"))
 				if err == nil {
@@ -114,6 +129,9 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 					p.logger.Error("Failed to resolve LocalAddr %s: %v", sourceIP, err)
 				}
 			}
+
+			targetAddr := net.JoinHostPort(ips[0].String(), port)
+			return dialer.DialContext(ctx, network, targetAddr)
 		}
 
 		return dialer.DialContext(ctx, network, addr)

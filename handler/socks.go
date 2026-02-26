@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/url"
@@ -149,7 +150,7 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 	s.ph.mu.RUnlock()
 
 	targetHost := d.Address()
-	target, _, _ := net.SplitHostPort(targetHost)
+	target, port, _ := net.SplitHostPort(targetHost)
 	clientKey := addr.String() + "->" + targetHost
 
 	proxyURL, decision, err := currentDecision.GetProxyForHost(target)
@@ -169,12 +170,11 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 		if proxyURL == "" {
 			s.logger.Info("SOCKS5 UDP Direct: %s (rule: %s)", target, decision.RuleName)
 
-			extIf := currentDecision.config.ExternalIf
 			extIp4 := currentDecision.config.ExternalIp4
 			extIp6 := currentDecision.config.ExternalIp6
 			extDns := currentDecision.config.ExternalDns
 
-			if extIf == "" && extIp4 == "" && extIp6 == "" {
+			if extIp4 == "" && extIp6 == "" {
 				return s.defaultHandler.UDPHandle(server, addr, d)
 			}
 
@@ -182,14 +182,23 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 				Timeout: 10 * time.Second,
 			}
 
-			if extIp4 != "" || extIp6 != "" {
-				sourceIP, _ := s.ph.getSourceIp(targetHost, extDns, extIp4, extIp6)
-				if sourceIP != "" {
-					dialer.LocalAddr = &net.UDPAddr{IP: net.ParseIP(sourceIP), Port: 0}
-				}
+			ips, err := currentDecision.cache.ResolveExternalHost(target, extDns, extIp4, extIp6, getSourceIpByIps)
+			if err != nil {
+				s.logger.Error("SOCKS5 UDP DNS Resolve Error for %s: %v", target, err)
+				return err
 			}
 
-			upstreamConn, err = dialer.Dial("udp", targetHost)
+			if len(ips) == 0 {
+				return fmt.Errorf("no IP addresses found for host: %s", target)
+			}
+
+			sourceIP := getSourceIpByIps(ips, extIp4, extIp6)
+			if sourceIP != "" {
+				dialer.LocalAddr = &net.UDPAddr{IP: net.ParseIP(sourceIP), Port: 0}
+			}
+
+			targetIPAddr := net.JoinHostPort(ips[0].String(), port)
+			upstreamConn, err = dialer.Dial("udp", targetIPAddr)
 			if err != nil {
 				s.logger.Error("SOCKS5 UDP Direct Dial Error: %v", err)
 				return err
