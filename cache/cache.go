@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -121,6 +122,19 @@ func (c *CacheManager) ResolveHost(hostname string) ([]net.IP, error) {
 	return ipsInterface.([]net.IP), nil
 }
 
+func shuffledIps(ips []net.IP) []net.IP {
+	shuffled := make([]net.IP, len(ips))
+	copy(shuffled, ips)
+
+	if len(shuffled) > 1 {
+		rand.Shuffle(len(shuffled), func(i, j int) {
+			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+		})
+	}
+
+	return shuffled
+}
+
 func (c *CacheManager) ResolveExternalHost(hostname, extDns, extIp4, extIp6 string, getSourceIpByIps func(ips []net.IP, extIp4, extIp6 string) string) ([]net.IP, error) {
 	if ip := net.ParseIP(hostname); ip != nil {
 		return []net.IP{ip}, nil
@@ -129,12 +143,12 @@ func (c *CacheManager) ResolveExternalHost(hostname, extDns, extIp4, extIp6 stri
 	cacheKey := fmt.Sprintf("ext:%s:%s", extDns, hostname)
 
 	if ips, exists := c.dnsCache.Get(cacheKey); exists {
-		return ips, nil
+		return shuffledIps(ips), nil
 	}
 
 	ipsInterface, err, _ := c.extDnsGroup.Do(hostname, func() (interface{}, error) {
 		if ips, exists := c.dnsCache.Get(cacheKey); exists {
-			return ips, nil
+			return shuffledIps(ips), nil
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
