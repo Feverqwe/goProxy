@@ -15,6 +15,10 @@ GoProxy is a sophisticated proxy server written in Go that provides intelligent 
 - **Blocking Support**: Ability to block specific domains/URLs
 - **External Rule Sources**: Support for loading rules from URLs and local files
 - **Inverted Rules**: Support for "not" logic to match everything except specified patterns
+- **External Interface Binding**: Bind connections to specific network interfaces or IP addresses
+- **Custom DNS Resolution**: Configurable DNS servers with source IP binding
+- **UDP Support**: SOCKS5 UDP association support
+- **Connection Pooling**: Efficient connection reuse and management
 
 ## Installation
 
@@ -28,7 +32,7 @@ Download the latest release from the [Releases page](https://github.com/Feverqwe
 
 ### Building from Source
 
-1. **Prerequisites**: Go 1.24.0 or later
+1. **Prerequisites**: Go 1.25.0 or later
 2. **Clone the repository**:
    ```bash
    git clone https://github.com/Feverqwe/goProxy.git
@@ -111,6 +115,12 @@ rules:
     proxy: "http"
     externalRule: "./external-rules.yaml"
     hosts: "additional-host.com"  # Will be merged with external rule hosts
+
+# External interface and DNS configuration for source IP binding
+externalIf: "eth0"      # Auto-detect IPs from this interface
+externalIp4: ""         # Force IPv4 source address
+externalIp6: ""         # Force IPv6 source address
+externalDns: "8.8.8.8"  # Custom DNS server for resolution
 ```
 
 ### Configuration Options
@@ -125,6 +135,10 @@ rules:
 - `maxLogSize`: Maximum log file size in MB before rotation
 - `maxLogFiles`: Number of backup log files to keep
 - `autoReloadHours`: Automatic configuration reload interval in hours (0 to disable)
+- `externalIf`: Network interface name for auto-detecting source IPs
+- `externalIp4`: Force IPv4 source address for direct connections
+- `externalIp6`: Force IPv6 source address for direct connections
+- `externalDns`: Custom DNS server for host resolution (IP:port format)
 
 #### Proxy Definitions
 - `direct`: No proxy (direct connection)
@@ -269,11 +283,14 @@ Example:
 ### Proxy Handler Features
 
 - **HTTP/HTTPS Support**: Full HTTP proxy functionality with CONNECT method support
-- **SOCKS5 Support**: SOCKS5 proxy connections with authentication
+- **SOCKS5 Support**: SOCKS5 proxy connections with authentication and UDP association
 - **Dual Server Mode**: Simultaneous HTTP/HTTPS and SOCKS5 server operation
-- **Connection Pooling**: Efficient connection reuse
+- **Connection Pooling**: Efficient connection reuse with configurable timeouts
 - **Authentication**: Support for proxy authentication (Basic Auth for HTTP, User/Pass for SOCKS5)
 - **Blocking**: Configurable request blocking with proper HTTP error responses
+- **Source IP Binding**: Bind connections to specific interfaces or IP addresses
+- **Custom DNS**: Configurable DNS resolution with source IP binding support
+- **UDP Support**: SOCKS5 UDP association with session management
 
 ## Development
 
@@ -282,11 +299,13 @@ Example:
 - [`github.com/elazarl/goproxy`](https://github.com/elazarl/goproxy): Core HTTP/HTTPS proxy functionality
 - [`github.com/getlantern/systray`](https://github.com/getlantern/systray): System tray integration
 - [`github.com/gobwas/glob`](https://github.com/gobwas/glob): Pattern matching
-- [`github.com/hashicorp/golang-lru/v2`](https://github.com/hashicorp/golang-lru): LRU caching
+- [`github.com/hashicorp/golang-lru/v2`](https://github.com/hashicorp/golang-lru/v2): LRU caching
 - [`github.com/txthinking/socks5`](https://github.com/txthinking/socks5): SOCKS5 server implementation
 - [`gopkg.in/yaml.v3`](https://github.com/go-yaml/yaml): YAML configuration parsing
 - [`gopkg.in/natefinch/lumberjack.v2`](https://github.com/natefinch/lumberjack): Log file rotation
 - [`github.com/skratchdot/open-golang`](https://github.com/skratchdot/open-golang): Opening config directory
+- [`golang.org/x/net`](https://pkg.go.dev/golang.org/x/net): Extended networking capabilities
+- [`golang.org/x/sync`](https://pkg.go.dev/golang.org/x/sync): Synchronization primitives
 
 ### Building and Testing
 
