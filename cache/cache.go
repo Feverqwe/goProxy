@@ -19,12 +19,11 @@ const (
 )
 
 type CacheManager struct {
-	globCache   map[string]glob.Glob
-	cidrCache   map[string]*net.IPNet
-	dnsCache    *lru.LRU[string, []net.IP]
-	dnsGroup    singleflight.Group
-	extDnsGroup singleflight.Group
-	mu          sync.RWMutex
+	globCache map[string]glob.Glob
+	cidrCache map[string]*net.IPNet
+	dnsCache  *lru.LRU[string, []net.IP]
+	dnsGroup  singleflight.Group
+	mu        sync.RWMutex
 }
 
 func NewCacheManager() *CacheManager {
@@ -146,7 +145,7 @@ func (c *CacheManager) ResolveExternalHost(hostname, extDns, extIp4, extIp6 stri
 		return shuffledIps(ips), nil
 	}
 
-	ipsInterface, err, _ := c.extDnsGroup.Do(hostname, func() (interface{}, error) {
+	ipsInterface, err, _ := c.dnsGroup.Do(cacheKey, func() (interface{}, error) {
 		if ips, exists := c.dnsCache.Get(cacheKey); exists {
 			return shuffledIps(ips), nil
 		}
