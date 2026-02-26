@@ -97,11 +97,9 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 	}
 
 	if proxyURL == "" {
-		p.mu.RLock()
 		extIp4 := currentDecision.config.ExternalIp4
 		extIp6 := currentDecision.config.ExternalIp6
 		extDns := currentDecision.config.ExternalDns
-		p.mu.RUnlock()
 
 		if extIp4 != "" || extIp6 != "" {
 			host, port, err := net.SplitHostPort(addr)
