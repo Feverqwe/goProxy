@@ -18,11 +18,12 @@ const (
 )
 
 type CacheManager struct {
-	globCache map[string]glob.Glob
-	cidrCache map[string]*net.IPNet
-	dnsCache  *lru.LRU[string, []net.IP]
-	dnsGroup  singleflight.Group
-	mu        sync.RWMutex
+	globCache   map[string]glob.Glob
+	cidrCache   map[string]*net.IPNet
+	dnsCache    *lru.LRU[string, []net.IP]
+	dnsGroup    singleflight.Group
+	extDnsGroup singleflight.Group
+	mu          sync.RWMutex
 }
 
 func NewCacheManager() *CacheManager {
@@ -110,6 +111,66 @@ func (c *CacheManager) ResolveHost(hostname string) ([]net.IP, error) {
 		}
 
 		c.dnsCache.Add(hostname, ips)
+		return ips, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return ipsInterface.([]net.IP), nil
+}
+
+func (c *CacheManager) ResolveExternalHost(hostname, extDns, extIp4, extIp6 string, getSourceIpByIps func(ips []net.IP, extIp4, extIp6 string) string) ([]net.IP, error) {
+	if ip := net.ParseIP(hostname); ip != nil {
+		return []net.IP{ip}, nil
+	}
+
+	cacheKey := fmt.Sprintf("ext:%s:%s", extDns, hostname)
+
+	if ips, exists := c.dnsCache.Get(cacheKey); exists {
+		return ips, nil
+	}
+
+	ipsInterface, err, _ := c.extDnsGroup.Do(hostname, func() (interface{}, error) {
+		if ips, exists := c.dnsCache.Get(cacheKey); exists {
+			return ips, nil
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var resolver *net.Resolver
+		if extDns != "" {
+			dnsAddr := extDns
+			dnsHost, _, err := net.SplitHostPort(extDns)
+			if err != nil {
+				dnsHost = extDns
+				dnsAddr = net.JoinHostPort(extDns, "53")
+			}
+
+			resolver = &net.Resolver{
+				PreferGo: true,
+				Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+					dnsIp := net.ParseIP(dnsHost)
+					sourceIP := getSourceIpByIps([]net.IP{dnsIp}, extIp4, extIp6)
+					d := net.Dialer{Timeout: time.Second * 5}
+					if sourceIP != "" {
+						d.LocalAddr = &net.UDPAddr{IP: net.ParseIP(sourceIP)}
+					}
+					return d.DialContext(ctx, "udp", dnsAddr)
+				},
+			}
+		} else {
+			resolver = net.DefaultResolver
+		}
+
+		ips, err := resolver.LookupIP(ctx, "ip", hostname)
+		if err != nil {
+			return nil, err
+		}
+
+		c.dnsCache.Add(cacheKey, ips)
 		return ips, nil
 	})
 
