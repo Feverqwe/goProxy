@@ -145,7 +145,9 @@ func (c *CacheManager) ResolveExternalHost(hostname, extDns string, getSourceIpB
 		return shuffledIps(ips), nil
 	}
 
+	isInflughtCache := true
 	ipsInterface, err, _ := c.dnsGroup.Do(cacheKey, func() (interface{}, error) {
+		isInflughtCache = false
 		if ips, exists := c.dnsCache.Get(cacheKey); exists {
 			return shuffledIps(ips), nil
 		}
@@ -191,7 +193,12 @@ func (c *CacheManager) ResolveExternalHost(hostname, extDns string, getSourceIpB
 		return nil, err
 	}
 
-	return ipsInterface.([]net.IP), nil
+	ips := ipsInterface.([]net.IP)
+	if isInflughtCache {
+		ips = shuffledIps(ips)
+	}
+
+	return ips, nil
 }
 
 func (c *CacheManager) PrecompilePatterns(hostPatterns, ipPatterns []string) {
