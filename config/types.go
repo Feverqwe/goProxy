@@ -49,6 +49,7 @@ type ProxyConfig struct {
 	ExternalIp4     string            `yaml:"externalIp4"`
 	ExternalIp6     string            `yaml:"externalIp6"`
 	ExternalIf      string            `yaml:"externalIf"`
+	ExternalDns     string            `yaml:"externalDns"`
 
 	logLevelInt int
 	cache       *cache.CacheManager

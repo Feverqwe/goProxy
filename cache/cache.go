@@ -104,8 +104,7 @@ func (c *CacheManager) ResolveHost(hostname string) ([]net.IP, error) {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		var resolver net.Resolver
-		ips, err := resolver.LookupIP(ctx, "ip", hostname)
+		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", hostname)
 		if err != nil {
 			return nil, err
 		}

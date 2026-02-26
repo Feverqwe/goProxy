@@ -100,10 +100,11 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 		p.mu.RLock()
 		extIp4 := currentDecision.config.ExternalIp4
 		extIp6 := currentDecision.config.ExternalIp6
+		extDns := currentDecision.config.ExternalDns
 		p.mu.RUnlock()
 
 		if extIp4 != "" || extIp6 != "" {
-			sourceIP, _ := p.getSourceIp(addr, extIp4, extIp6)
+			sourceIP, _ := p.getSourceIp(addr, extDns, extIp4, extIp6)
 			if sourceIP != "" {
 				localAddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(sourceIP, "0"))
 				if err == nil {

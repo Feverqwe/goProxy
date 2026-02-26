@@ -172,6 +172,7 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 			extIf := currentDecision.config.ExternalIf
 			extIp4 := currentDecision.config.ExternalIp4
 			extIp6 := currentDecision.config.ExternalIp6
+			extDns := currentDecision.config.ExternalDns
 
 			if extIf == "" && extIp4 == "" && extIp6 == "" {
 				return s.defaultHandler.UDPHandle(server, addr, d)
@@ -182,7 +183,7 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 			}
 
 			if extIp4 != "" || extIp6 != "" {
-				sourceIP, _ := s.ph.getSourceIp(targetHost, extIp4, extIp6)
+				sourceIP, _ := s.ph.getSourceIp(targetHost, extDns, extIp4, extIp6)
 				if sourceIP != "" {
 					dialer.LocalAddr = &net.UDPAddr{IP: net.ParseIP(sourceIP), Port: 0}
 				}
