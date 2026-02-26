@@ -182,7 +182,9 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 				Timeout: 10 * time.Second,
 			}
 
-			ips, err := currentDecision.cache.ResolveExternalHost(target, extDns, extIp4, extIp6, getSourceIpByIps)
+			ips, err := currentDecision.cache.ResolveExternalHost(target, extDns, func(ips []net.IP) string {
+				return getSourceIpByIps(ips, extIp4, extIp6)
+			})
 			if err != nil {
 				s.logger.Error("SOCKS5 UDP DNS Resolve Error for %s: %v", target, err)
 				return err

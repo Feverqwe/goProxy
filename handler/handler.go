@@ -107,7 +107,9 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 				return nil, fmt.Errorf("invalid address format %s: %w", addr, err)
 			}
 
-			ips, err := p.decision.cache.ResolveExternalHost(host, extDns, extIp4, extIp6, getSourceIpByIps)
+			ips, err := p.decision.cache.ResolveExternalHost(host, extDns, func(ips []net.IP) string {
+				return getSourceIpByIps(ips, extIp4, extIp6)
+			})
 			if err != nil {
 				p.logger.Error("DNS Resolve Error for %s: %v", host, err)
 				return nil, err

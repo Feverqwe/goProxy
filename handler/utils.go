@@ -21,7 +21,9 @@ func getSourceIpByIps(ips []net.IP, extIp4, extIp6 string) string {
 
 func (s *ProxyHandler) getSourceIp(addr string, extDns, extIp4, extIp6 string) (string, error) {
 	host, _, _ := net.SplitHostPort(addr)
-	ips, err := s.decision.cache.ResolveExternalHost(host, extDns, extIp4, extIp6, getSourceIpByIps)
+	ips, err := s.decision.cache.ResolveExternalHost(host, extDns, func(ips []net.IP) string {
+		return getSourceIpByIps(ips, extIp4, extIp6)
+	})
 	if err != nil {
 		return "", err
 	}

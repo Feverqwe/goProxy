@@ -134,7 +134,7 @@ func shuffledIps(ips []net.IP) []net.IP {
 	return shuffled
 }
 
-func (c *CacheManager) ResolveExternalHost(hostname, extDns, extIp4, extIp6 string, getSourceIpByIps func(ips []net.IP, extIp4, extIp6 string) string) ([]net.IP, error) {
+func (c *CacheManager) ResolveExternalHost(hostname, extDns string, getSourceIpByIps func(ips []net.IP) string) ([]net.IP, error) {
 	if ip := net.ParseIP(hostname); ip != nil {
 		return []net.IP{ip}, nil
 	}
@@ -166,7 +166,7 @@ func (c *CacheManager) ResolveExternalHost(hostname, extDns, extIp4, extIp6 stri
 				PreferGo: true,
 				Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 					dnsIp := net.ParseIP(dnsHost)
-					sourceIP := getSourceIpByIps([]net.IP{dnsIp}, extIp4, extIp6)
+					sourceIP := getSourceIpByIps([]net.IP{dnsIp})
 					d := net.Dialer{Timeout: time.Second * 5}
 					if sourceIP != "" {
 						d.LocalAddr = &net.UDPAddr{IP: net.ParseIP(sourceIP)}
