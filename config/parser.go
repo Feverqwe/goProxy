@@ -53,7 +53,7 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 	for i := range c.Rules {
 		rule := &c.Rules[i]
 
-		externalRule := &RuleBaseConfig{}
+		var externalRule *RuleBaseConfig
 		if rule.ExternalRule != "" {
 			var err error
 			externalRule, err = c.loadExternalRuleFile(rule.ExternalRule, configDir, cacheOnly, httpClientFunc)
@@ -89,11 +89,15 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 			return expanded
 		}
 
-		rule.parsedHosts = append(expandTokens(rule.Hosts, true), expandTokens(externalRule.Hosts, true)...)
-		rule.parsedIps = append(expandTokens(rule.Ips, false), expandTokens(externalRule.Ips, false)...)
+		rule.parsedHosts = expandTokens(rule.Hosts, true)
+		rule.parsedIps = expandTokens(rule.Ips, false)
+		if externalRule != nil {
+			rule.parsedHosts = append(rule.parsedHosts, expandTokens(externalRule.Hosts, true)...)
+			rule.parsedIps = append(rule.parsedIps, expandTokens(externalRule.Ips, false)...)
+		}
 
 		if rule.Name == "" {
-			if externalRule.Name != "" {
+			if externalRule != nil && externalRule.Name != "" {
 				rule.Name = externalRule.Name
 			} else {
 				rule.Name = "unnamed rule"
@@ -104,7 +108,7 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 
 func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc) (*RuleBaseConfig, error) {
 	if source == "" {
-		return &RuleBaseConfig{}, nil
+		return nil, nil
 	}
 
 	content, err := loadExternalRules(source, configDir, cacheOnly, httpClientFunc, c.logger)
