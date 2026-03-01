@@ -18,12 +18,10 @@ type Logger interface {
 }
 
 type RuleBaseConfig struct {
-	Name          string `yaml:"name,omitempty"`
-	Ips           string `yaml:"ips,omitempty"`
-	Hosts         string `yaml:"hosts,omitempty"`
-	ExternalIps   string `yaml:"externalIps,omitempty"`
-	ExternalHosts string `yaml:"externalHosts,omitempty"`
-	ExternalRule  string `yaml:"externalRule,omitempty"`
+	Name         string `yaml:"name,omitempty"`
+	Ips          string `yaml:"ips,omitempty"`
+	Hosts        string `yaml:"hosts,omitempty"`
+	ExternalRule string `yaml:"externalRule,omitempty"`
 
 	parsedIps   []string
 	parsedHosts []string
@@ -32,7 +30,6 @@ type RuleBaseConfig struct {
 type RuleConfig struct {
 	RuleBaseConfig `yaml:",inline"`
 	Proxy          string `yaml:"proxy"`
-	Not            bool   `yaml:"not,omitempty"`
 }
 
 type ProxyConfig struct {

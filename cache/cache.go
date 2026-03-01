@@ -209,14 +209,30 @@ func (c *CacheManager) PrecompilePatterns(hostPatterns, ipPatterns []string) {
 	c.cidrCache = make(map[string]*net.IPNet)
 
 	for _, pattern := range hostPatterns {
-		if g, err := glob.Compile(pattern); err == nil {
-			c.globCache[pattern] = g
+		cleanPattern := strings.TrimPrefix(pattern, "!")
+		if _, exists := c.globCache[cleanPattern]; !exists {
+			if g, err := glob.Compile(cleanPattern); err == nil {
+				c.globCache[cleanPattern] = g
+			}
 		}
 	}
 
 	for _, cidr := range ipPatterns {
-		if _, ipNet, err := net.ParseCIDR(cidr); err == nil {
-			c.cidrCache[cidr] = ipNet
+		cleanCidr := strings.TrimPrefix(cidr, "!")
+		if _, exists := c.cidrCache[cleanCidr]; !exists {
+			normalized := cleanCidr
+			if !strings.Contains(cleanCidr, "/") {
+				if ip := net.ParseIP(cleanCidr); ip != nil {
+					if ip.To4() != nil {
+						normalized += "/32"
+					} else {
+						normalized += "/128"
+					}
+				}
+			}
+			if _, ipNet, err := net.ParseCIDR(normalized); err == nil {
+				c.cidrCache[cleanCidr] = ipNet
+			}
 		}
 	}
 }

@@ -28,7 +28,7 @@ func parseLogLevel(level string) int {
 	}
 }
 
-func (c *ProxyConfig) GetAllIps() []string {
+func (c *ProxyConfig) getAllIps() []string {
 	var allIPs []string
 	for _, rule := range c.Rules {
 		allIPs = append(allIPs, rule.parsedIps...)
@@ -36,7 +36,7 @@ func (c *ProxyConfig) GetAllIps() []string {
 	return allIPs
 }
 
-func (c *ProxyConfig) GetAllHosts() []string {
+func (c *ProxyConfig) getAllHosts() []string {
 	var allHosts []string
 	for _, rule := range c.Rules {
 		allHosts = append(allHosts, rule.parsedHosts...)

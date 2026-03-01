@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	"goProxy/cache"
 	"goProxy/config"
@@ -86,87 +87,56 @@ func (d *ProxyDecision) getProxyDecision(host string) ProxyDecisionResult {
 }
 
 func (d *ProxyDecision) evaluateRules(host string) ProxyDecisionResult {
+OuterLoop:
 	for _, rule := range d.config.Rules {
-		matchesRule := false
+		matchFound := false
 		matchType := ""
+		parsedHosts := rule.GetParsedHosts()
+		parsedIps := rule.GetParsedIps()
 
-		hostRules := rule.GetParsedHosts()
-		if len(hostRules) > 0 {
-			for _, hostRule := range hostRules {
-				if d.matchesGlob(hostRule, host) {
-					matchesRule = true
-					matchType = "host"
-					break
+		for _, pattern := range parsedHosts {
+			isNegation := strings.HasPrefix(pattern, "!")
+			actualPattern := strings.TrimPrefix(pattern, "!")
+
+			if d.matchesGlob(actualPattern, host) {
+				if isNegation {
+					d.logger.Debug("Rule '%s' negated by host pattern '%s' for host '%s'. Skipping rule.", rule.Name, pattern, host)
+					continue OuterLoop
 				}
+				d.logger.Debug("Rule '%s' match: target '%s', pattern '%s'", rule.Name, host, actualPattern)
+				matchFound = true
+				matchType = "host"
 			}
 		}
 
-		ipRules := rule.GetParsedIps()
-		if !matchesRule && len(ipRules) > 0 {
-			var targetIPs []net.IP
-
-			ips, err := d.cache.ResolveHost(host)
+		if len(parsedIps) > 0 {
+			targetIPs, err := d.cache.ResolveHost(host)
 			if err == nil {
-				targetIPs = ips
-				d.logger.Debug("Resolved target host %s to %v", host, ips)
-			}
+				d.logger.Debug("Resolved target host %s to %v", host, targetIPs)
 
-			if len(targetIPs) > 0 {
-				for _, ipRule := range ipRules {
-					ipNet, err := d.cache.GetCIDRNet(ipRule)
-					if err == nil {
-						for _, tip := range targetIPs {
-							if ipNet.Contains(tip) {
-								d.logger.Debug("Match: target %s (IP: %s) fits CIDR rule %s", host, tip, ipRule)
-								matchesRule = true
-								matchType = "ip"
-								break
-							}
-						}
-					} else {
-						d.logger.Debug("Rule '%s' is not a CIDR, attempting DNS resolve", ipRule)
+				for _, ipPattern := range parsedIps {
+					isNegation := strings.HasPrefix(ipPattern, "!")
+					actualIP := strings.TrimPrefix(ipPattern, "!")
 
-						ruleIPs, err := d.cache.ResolveHost(ipRule)
-						if err == nil {
-							for _, rip := range ruleIPs {
-								for _, tip := range targetIPs {
-									if rip.Equal(tip) {
-										d.logger.Debug("Match: target %s (IP: %s) matches IP from rule %s", host, tip, ipRule)
-										matchesRule = true
-										matchType = "ip"
-										break
-									}
-								}
-								if matchesRule {
-									break
-								}
-							}
-						} else {
-							d.logger.Debug("Failed to resolve domain rule '%s': %v", ipRule, err)
+					if d.checkIPMatch(actualIP, targetIPs) {
+						if isNegation {
+							d.logger.Debug("Rule '%s' negated by IP pattern '%s' for host '%s'. Skipping rule.", rule.Name, ipPattern, host)
+							continue OuterLoop
 						}
-					}
-					if matchesRule {
-						break
+						if !matchFound {
+							d.logger.Debug("Rule '%s' match: target '%s', pattern '%s'", rule.Name, host, ipPattern)
+							matchFound = true
+							matchType = "ip"
+						}
 					}
 				}
 			}
 		}
 
-		if rule.Not {
-			matchesRule = !matchesRule
-			if matchesRule && matchType == "" {
-				matchType = "inverse"
-			}
-		}
-
-		if matchesRule {
-			ruleName := rule.Name
-			if ruleName == "" {
-				ruleName = "unnamed rule"
-			}
+		if matchFound {
 			return ProxyDecisionResult{
 				Proxy:     rule.Proxy,
-				RuleName:  ruleName,
+				RuleName:  rule.Name,
 				MatchType: matchType,
 			}
 		}
@@ -177,4 +147,29 @@ func (d *ProxyDecision) evaluateRules(host string) ProxyDecisionResult {
 		RuleName:  "default",
 		MatchType: "default",
 	}
+}
+
+func (d *ProxyDecision) checkIPMatch(pattern string, targetIPs []net.IP) bool {
+	if ipNet, err := d.cache.GetCIDRNet(pattern); err == nil {
+		for _, tip := range targetIPs {
+			if ipNet.Contains(tip) {
+				return true
+			}
+		}
+		return false
+	}
+
+	ruleIPs, err := d.cache.ResolveHost(pattern)
+	if err == nil {
+		for _, rip := range ruleIPs {
+			for _, tip := range targetIPs {
+				if rip.Equal(tip) {
+					return true
+				}
+			}
+		}
+	} else {
+		d.logger.Debug("Failed to resolve domain rule '%s': %v", pattern, err)
+	}
+	return false
 }

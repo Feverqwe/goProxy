@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"strings"
-	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -59,52 +58,47 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 			var err error
 			externalRule, err = c.loadExternalRuleFile(rule.ExternalRule, configDir, cacheOnly, httpClientFunc)
 			if err != nil {
-				c.logger.Warn("Failed to load external rule file from %s: %v", rule.ExternalRule, err)
+				c.logger.Warn("Failed to load external rule file: %v", err)
 			}
 		}
 
-		parsedIps := parseStringToList(strings.TrimSpace(rule.Ips+"\n"+externalRule.Ips), false)
-		parsedHosts := parseStringToList(strings.TrimSpace(rule.Hosts+"\n"+externalRule.Hosts), true)
+		expandTokens := func(input string, expandWildcardDomains bool) []string {
+			if input == "" {
+				return []string{}
+			}
+			tokens := parseStringToList(input, expandWildcardDomains)
+			var expanded []string
 
-		type loadTask struct {
-			sources         []string
-			expandWildcards bool
-			result          *[]string
-		}
+			for _, t := range tokens {
+				isNegation := strings.HasPrefix(t, "!")
+				cleanToken := strings.TrimPrefix(t, "!")
 
-		tasks := []loadTask{
-			{parseStringToList(strings.TrimSpace(rule.ExternalIps+"\n"+externalRule.ExternalIps), false), false, &parsedIps},
-			{parseStringToList(strings.TrimSpace(rule.ExternalHosts+"\n"+externalRule.ExternalHosts), false), true, &parsedHosts},
-		}
-
-		var wg sync.WaitGroup
-		var mu sync.Mutex
-
-		for _, task := range tasks {
-			for _, source := range task.sources {
-				if source == "" {
-					continue
+				if strings.HasPrefix(cleanToken, "http://") || strings.HasPrefix(cleanToken, "https://") {
+					list := c.loadExternalRuleList(cleanToken, expandWildcardDomains, configDir, cacheOnly, httpClientFunc)
+					for _, line := range list {
+						if isNegation {
+							expanded = append(expanded, "!"+line)
+						} else {
+							expanded = append(expanded, line)
+						}
+					}
+				} else {
+					expanded = append(expanded, t)
 				}
+			}
+			return expanded
+		}
 
-				wg.Add(1)
-				go func(source string, expandWildcards bool, result *[]string) {
-					defer wg.Done()
-					rules := c.loadExternalRuleList(source, expandWildcards, configDir, cacheOnly, httpClientFunc)
-					mu.Lock()
-					*result = append(*result, rules...)
-					mu.Unlock()
-				}(source, task.expandWildcards, task.result)
+		rule.parsedHosts = append(expandTokens(rule.Hosts, true), expandTokens(externalRule.Hosts, true)...)
+		rule.parsedIps = append(expandTokens(rule.Ips, false), expandTokens(externalRule.Ips, false)...)
+
+		if rule.Name == "" {
+			if externalRule.Name != "" {
+				rule.Name = externalRule.Name
+			} else {
+				rule.Name = "unnamed rule"
 			}
 		}
-
-		wg.Wait()
-
-		if rule.Name == "" && externalRule.Name != "" {
-			rule.Name = externalRule.Name
-		}
-
-		rule.parsedHosts = parsedHosts
-		rule.parsedIps = parsedIps
 	}
 }
 

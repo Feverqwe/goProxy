@@ -72,7 +72,7 @@ func (c *ProxyConfig) afterLoad(httpClientFunc HTTPClientFunc, cacheOnly bool) {
 
 	c.preParseRuleLists(configDir, cacheOnly, httpClientFunc)
 
-	c.cache.PrecompilePatterns(c.GetAllHosts(), c.GetAllIps())
+	c.cache.PrecompilePatterns(c.getAllHosts(), c.getAllIps())
 }
 
 func saveDefaultConfig(configPath string, config *ProxyConfig) error {
