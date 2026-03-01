@@ -73,7 +73,7 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 				isNegation := strings.HasPrefix(t, "!")
 				cleanToken := strings.TrimPrefix(t, "!")
 
-				if strings.HasPrefix(cleanToken, "http://") || strings.HasPrefix(cleanToken, "https://") {
+				if strings.HasPrefix(cleanToken, "http://") || strings.HasPrefix(cleanToken, "https://") || strings.HasPrefix(cleanToken, "/") || strings.HasPrefix(cleanToken, "./") {
 					list := c.loadExternalRuleList(cleanToken, expandWildcardDomains, configDir, cacheOnly, httpClientFunc)
 					for _, line := range list {
 						if isNegation {
