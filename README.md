@@ -158,18 +158,6 @@ Rules are evaluated in order. Each rule can match based on:
 #### External Rule Sources
 GoProxy supports loading rules from external sources:
 
-**Individual Rule Lists:**
-- **URLs**: HTTP/HTTPS endpoints (automatically cached)
-- **Local files**: Relative to config directory or absolute paths
-- **Caching**: External rules are cached locally for performance
-- **Fallback**: Uses cached version if external source is unavailable
-
-**Complete Rule Configuration (ExternalRule):**
-- **YAML files**: Load complete rule configuration from external YAML files
-- **Field merging**: Fields from external rule are merged with main rule
-- **Relative paths**: Files are resolved relative to main config directory
-- **No Proxy field**: External rule files use `RuleBaseConfig` (without Proxy field)
-
 Example external rule file (`external-rules.yaml`):
 ```yaml
 name: "External Rule Set"
@@ -245,52 +233,6 @@ When using `externalRule`, fields are merged as follows:
 
 This allows you to create modular rule configurations and combine multiple rule sources.
 
-## Logging
-
-GoProxy provides comprehensive logging with the following features:
-- Multiple log levels: DEBUG, INFO, WARN, ERROR
-- File logging with rotation
-- Console output (except Windows GUI)
-- Configurable log file size and retention
-
-### Log Format
-```
-[LEVEL] message with context
-```
-
-Example:
-```
-[INFO] Starting proxy server on :8080
-[INFO] HTTPS CONNECT to example.com via proxy socks5 (rule: 'External Domains')
-[INFO] Blocking request to malicious.com (rule: 'Blocked Domains', proxy: 'block')
-[INFO] Direct request to internal.company.com (rule: 'Local Networks', proxy: 'direct')
-[DEBUG] Resolved target host example.com to [93.184.216.34]
-```
-
-## Architecture
-
-### Core Components
-
-- **Main Application** ([`main.go`](main.go)): Orchestrates the proxy servers, system tray, and auto-reload functionality
-- **Configuration Management** ([`config/`](config/)): YAML config parsing, external rule loading, and management
-- **Proxy Handler** ([`handler/`](handler/)): HTTP/HTTPS request handling and routing logic
-- **SOCKS5 Handler** ([`handler/socks.go`](handler/socks.go)): SOCKS5 protocol implementation
-- **Caching System** ([`cache/`](cache/)): DNS, pattern, and CIDR caching for performance
-- **Logging System** ([`logging/`](logging/)): Configurable logging infrastructure with file rotation
-- **System Tray** ([`tray/`](tray/)): Platform-specific system tray integration (Windows/macOS)
-- **Ticker Manager** ([`ticker/`](ticker/)): Automatic periodic configuration reload functionality
-
-### Proxy Handler Features
-
-- **HTTP/HTTPS Support**: Full HTTP proxy functionality with CONNECT method support
-- **SOCKS5 Support**: SOCKS5 proxy connections with authentication and UDP association
-- **Dual Server Mode**: Simultaneous HTTP/HTTPS and SOCKS5 server operation
-- **Connection Pooling**: Efficient connection reuse with configurable timeouts
-- **Authentication**: Support for proxy authentication (Basic Auth for HTTP, User/Pass for SOCKS5)
-- **Blocking**: Configurable request blocking with proper HTTP error responses
-- **Source IP Binding**: Bind connections to specific interfaces or IP addresses
-- **Custom DNS**: Configurable DNS resolution with source IP binding support
-- **UDP Support**: SOCKS5 UDP association with session management
 
 ## Development
 
@@ -306,19 +248,6 @@ Example:
 - [`github.com/skratchdot/open-golang`](https://github.com/skratchdot/open-golang): Opening config directory
 - [`golang.org/x/net`](https://pkg.go.dev/golang.org/x/net): Extended networking capabilities
 - [`golang.org/x/sync`](https://pkg.go.dev/golang.org/x/sync): Synchronization primitives
-
-### Building and Testing
-
-```bash
-# Build for current platform
-go build -o goProxy
-
-# Run with custom config
-./goProxy -config ./config.yaml
-
-# Show version information
-./goProxy -version
-```
 
 ## License
 
