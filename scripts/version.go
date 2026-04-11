@@ -77,7 +77,7 @@ func (v *Version) Increment(incrementType string) error {
 }
 
 const (
-	versionFile   = "version.go"
+	versionFile   = "main.go"
 	variablesFile = "scripts/_variables.sh"
 )
 

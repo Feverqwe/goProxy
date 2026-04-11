@@ -18,6 +18,8 @@ import (
 	"github.com/txthinking/socks5"
 )
 
+var Version = "1.8.2"
+
 func main() {
 	defaultConfigPath := config.GetConfigPath()
 	configPath := flag.String("config", defaultConfigPath, "Path to configuration file")
@@ -25,8 +27,8 @@ func main() {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Println(GetVersion())
-		fmt.Println(GetBuildInfo())
+		version := fmt.Sprintf("GoProxy v%s", Version)
+		fmt.Println(version)
 		return
 	}
 
