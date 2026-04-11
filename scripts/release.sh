@@ -6,6 +6,7 @@ go run scripts/version.go up
 
 source "$(dirname $0)/_variables.sh"
 
+git add main.go
 git add scripts/_variables.sh
 git commit -m "v$VERSION"
 git push

@@ -18,7 +18,7 @@ import (
 	"github.com/txthinking/socks5"
 )
 
-var Version = "1.8.2"
+var Version = "1.8.3"
 
 func main() {
 	defaultConfigPath := config.GetConfigPath()
