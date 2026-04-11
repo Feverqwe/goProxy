@@ -39,9 +39,14 @@ func parseStringToList(input string, expandWildcardDomains bool) []string {
 	for _, part := range parts {
 		if part != "" {
 			result = append(result, part)
+			isNegation := strings.HasPrefix(part, "!")
+			cleanToken := strings.TrimPrefix(part, "!")
 
-			if expandWildcardDomains && strings.HasPrefix(part, "*.") {
-				baseDomain := strings.TrimPrefix(part, "*.")
+			if expandWildcardDomains && strings.HasPrefix(cleanToken, "*.") {
+				baseDomain := strings.TrimPrefix(cleanToken, "*.")
+				if isNegation {
+					baseDomain = "!" + baseDomain
+				}
 				result = append(result, baseDomain)
 			}
 		}
