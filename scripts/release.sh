@@ -12,5 +12,5 @@ git add scripts/_variables.sh
 git commit -m "v$VERSION"
 git push
 
-go run scripts/version.go tag
+VERSION=$VERSION go run scripts/version.go tag
 git push origin "v$VERSION"
