@@ -14,6 +14,6 @@ goProxy
 /bin/
 /dist/
 /build/
-/GoProxy.app/
+goProxy.app/
 *.log
 repomix-output.md

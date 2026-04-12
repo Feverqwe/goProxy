@@ -96,7 +96,7 @@ jobs:
   build-macos:
     name: Build macOS
     needs: version-check
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -115,7 +115,7 @@ jobs:
 
       - name: Create macOS archive
         run: |
-          zip -r goProxy-macos-${{ needs.version-check.outputs.version }}.zip GoProxy.app
+          zip -r goProxy-macos-${{ needs.version-check.outputs.version }}.zip goProxy.app
 
       - name: Upload macOS release asset
         uses: actions/upload-artifact@v4

@@ -4,7 +4,7 @@ set -e
 
 source "$(dirname $0)/_variables.sh"
 
-VERSION=$VERSION go run scripts/version.go up
+VERSION=$VERSION go run scripts/version/version.go up
 
 source "$(dirname $0)/_variables.sh"
 
@@ -12,5 +12,5 @@ git add scripts/_variables.sh
 git commit -m "v$VERSION"
 git push
 
-VERSION=$VERSION go run scripts/version.go tag
+VERSION=$VERSION go run scripts/version/version.go tag
 git push origin "v$VERSION"

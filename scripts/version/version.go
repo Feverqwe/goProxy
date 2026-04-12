@@ -136,7 +136,7 @@ func system(cmd string) error {
 func ShowHelp() {
 	fmt.Println(`Version management script for GoProxy
 
-Usage: go run scripts/version.go [command] [options]
+Usage: go run version.go [command] [options]
 
 Commands:
   get                    - Get current version
@@ -147,13 +147,13 @@ Commands:
   help                   - Show this help
 
 Examples:
-  go run scripts/version.go get                    # Get current version
-  go run scripts/version.go set 1.2.3             # Set version to 1.2.3
-  go run scripts/version.go inc patch             # Increment patch version (1.2.3 -> 1.2.4)
-  go run scripts/version.go inc minor             # Increment minor version (1.2.3 -> 1.3.0)
-  go run scripts/version.go inc major             # Increment major version (1.2.3 -> 2.0.0)
-  go run scripts/version.go up                    # Interactive version increment
-  go run scripts/version.go tag                   # Create git tag for current version
+  go run version.go get                    # Get current version
+  go run version.go set 1.2.3             # Set version to 1.2.3
+  go run version.go inc patch             # Increment patch version (1.2.3 -> 1.2.4)
+  go run version.go inc minor             # Increment minor version (1.2.3 -> 1.3.0)
+  go run version.go inc major             # Increment major version (1.2.3 -> 2.0.0)
+  go run version.go up                    # Interactive version increment
+  go run version.go tag                   # Create git tag for current version
 
 Version format: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]`)
 }
