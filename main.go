@@ -9,11 +9,11 @@ import (
 	"sync"
 	"syscall"
 
-	"goProxy/cache"
-	"goProxy/config"
-	"goProxy/handler"
-	"goProxy/ticker"
-	"goProxy/tray"
+	"goProxy/internal/cache"
+	"goProxy/internal/config"
+	"goProxy/internal/handler"
+	"goProxy/internal/ticker"
+	"goProxy/internal/tray"
 
 	"github.com/txthinking/socks5"
 )

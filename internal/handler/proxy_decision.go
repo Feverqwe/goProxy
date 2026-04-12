@@ -5,9 +5,9 @@ import (
 	"net"
 	"strings"
 
-	"goProxy/cache"
-	"goProxy/config"
-	"goProxy/logging"
+	"goProxy/internal/cache"
+	"goProxy/internal/config"
+	"goProxy/internal/logging"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	explru "github.com/hashicorp/golang-lru/v2/expirable"

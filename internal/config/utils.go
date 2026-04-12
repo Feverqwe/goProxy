@@ -2,7 +2,7 @@ package config
 
 import (
 	"fmt"
-	"goProxy/logging"
+	"goProxy/internal/logging"
 	"net"
 	"os"
 	"path/filepath"

@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"goProxy/cache"
-	"goProxy/config"
-	"goProxy/logging"
+	"goProxy/internal/cache"
+	"goProxy/internal/config"
+	"goProxy/internal/logging"
 
 	"github.com/txthinking/socks5"
 )

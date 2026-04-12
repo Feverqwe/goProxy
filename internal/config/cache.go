@@ -3,7 +3,7 @@ package config
 import (
 	"crypto/sha256"
 	"fmt"
-	"goProxy/logging"
+	"goProxy/internal/logging"
 	"io"
 	"net/http"
 	"os"

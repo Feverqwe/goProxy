@@ -2,7 +2,7 @@ package tray
 
 import (
 	"goProxy/internal"
-	"goProxy/logging"
+	"goProxy/internal/logging"
 
 	"github.com/skratchdot/open-golang/open"
 )

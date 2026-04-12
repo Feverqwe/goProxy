@@ -2,8 +2,8 @@ package config
 
 import (
 	"fmt"
-	"goProxy/cache"
-	"goProxy/logging"
+	"goProxy/internal/cache"
+	"goProxy/internal/logging"
 	"os"
 	"path/filepath"
 

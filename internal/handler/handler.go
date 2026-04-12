@@ -16,9 +16,9 @@ import (
 	"github.com/elazarl/goproxy"
 	"golang.org/x/net/proxy"
 
-	"goProxy/cache"
-	"goProxy/config"
-	"goProxy/logging"
+	"goProxy/internal/cache"
+	"goProxy/internal/config"
+	"goProxy/internal/logging"
 )
 
 type contextKey string

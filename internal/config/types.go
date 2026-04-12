@@ -1,8 +1,8 @@
 package config
 
 import (
-	"goProxy/cache"
-	"goProxy/logging"
+	"goProxy/internal/cache"
+	"goProxy/internal/logging"
 	"net/http"
 )
 
