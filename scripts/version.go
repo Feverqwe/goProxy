@@ -10,6 +10,10 @@ import (
 	"strings"
 )
 
+const (
+	variablesFile = "scripts/_variables.sh"
+)
+
 type Version struct {
 	Major      int
 	Minor      int
@@ -75,57 +79,12 @@ func (v *Version) Increment(incrementType string) error {
 	return nil
 }
 
-const (
-	versionFile   = "main.go"
-	variablesFile = "scripts/_variables.sh"
-)
-
 func GetCurrentVersion() (string, error) {
 	// First check if version is set in environment variable
 	if version := os.Getenv("VERSION"); version != "" {
 		return version, nil
 	}
-
-	// Fallback to reading from file
-	file, err := os.Open(versionFile)
-	if err != nil {
-		return "", fmt.Errorf("failed to open version file: %v", err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.Contains(line, "var Version = ") {
-
-			re := regexp.MustCompile(`var Version = "([^"]+)"`)
-			matches := re.FindStringSubmatch(line)
-			if matches != nil && len(matches) > 1 {
-				return matches[1], nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("version not found in %s", versionFile)
-}
-
-func UpdateVersionFile(newVersion string) error {
-	content, err := os.ReadFile(versionFile)
-	if err != nil {
-		return fmt.Errorf("failed to read version file: %v", err)
-	}
-
-	re := regexp.MustCompile(`var Version = "[^"]+"`)
-	newContent := re.ReplaceAllString(string(content), fmt.Sprintf(`var Version = "%s"`, newVersion))
-
-	err = os.WriteFile(versionFile, []byte(newContent), 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write version file: %v", err)
-	}
-
-	fmt.Printf("✓ Updated %s with version: %s\n", versionFile, newVersion)
-	fmt.Printf("💡 Don't forget to also set the VERSION environment variable if you want to use it\n")
-	return nil
+	return "", fmt.Errorf("VERSION variable is not set in environment")
 }
 
 func UpdateVariablesFile(newVersion string) error {
@@ -265,11 +224,6 @@ func main() {
 
 		fmt.Printf("Setting version: %s -> %s\n", currentVersion, newVersion)
 
-		if err := UpdateVersionFile(newVersion); err != nil {
-			fmt.Printf("❌ Error: %v\n", err)
-			os.Exit(1)
-		}
-
 		if err := UpdateVariablesFile(newVersion); err != nil {
 			fmt.Printf("❌ Error: %v\n", err)
 			os.Exit(1)
@@ -300,11 +254,6 @@ func main() {
 
 		newVersion := currentVersion.String()
 		fmt.Printf("Incrementing %s version: %s -> %s\n", incrementType, currentVersionStr, newVersion)
-
-		if err := UpdateVersionFile(newVersion); err != nil {
-			fmt.Printf("❌ Error: %v\n", err)
-			os.Exit(1)
-		}
 
 		if err := UpdateVariablesFile(newVersion); err != nil {
 			fmt.Printf("❌ Error: %v\n", err)
@@ -339,11 +288,6 @@ func main() {
 
 		newVersion := currentVersion.String()
 		fmt.Printf("Incrementing %s version: %s -> %s\n", incrementType, currentVersionStr, newVersion)
-
-		if err := UpdateVersionFile(newVersion); err != nil {
-			fmt.Printf("❌ Error: %v\n", err)
-			os.Exit(1)
-		}
 
 		if err := UpdateVariablesFile(newVersion); err != nil {
 			fmt.Printf("❌ Error: %v\n", err)
