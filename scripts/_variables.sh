@@ -9,5 +9,3 @@ ICON_PATH="./assets/icon.icns"
 
 # Version variables (can be overridden by environment)
 VERSION=1.8.3
-COMMIT=${COMMIT:-unknown}
-BUILD_TIME=${BUILD_TIME:-unknown}

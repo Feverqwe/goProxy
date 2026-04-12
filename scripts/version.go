@@ -19,7 +19,6 @@ type Version struct {
 }
 
 func ParseVersion(version string) (*Version, error) {
-
 	re := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9\.]+))?(?:\+([a-zA-Z0-9\.]+))?$`)
 	matches := re.FindStringSubmatch(version)
 

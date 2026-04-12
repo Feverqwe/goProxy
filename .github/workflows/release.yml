@@ -72,8 +72,6 @@ jobs:
       - name: Build Windows executable
         env:
           VERSION: ${{ needs.version-check.outputs.version }}
-          COMMIT: ${{ github.sha }}
-          BUILD_TIME: ${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
         run: |
           cd scripts
           .\build.win.bat
@@ -111,8 +109,6 @@ jobs:
       - name: Build macOS application
         env:
           VERSION: ${{ needs.version-check.outputs.version }}
-          COMMIT: ${{ github.sha }}
-          BUILD_TIME: ${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
         run: |
           chmod +x ./scripts/*.sh
           sh ./scripts/build.mac.sh
@@ -152,8 +148,6 @@ jobs:
       - name: Build Linux binary
         env:
           VERSION: ${{ needs.version-check.outputs.version }}
-          COMMIT: ${{ github.sha }}
-          BUILD_TIME: ${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
         run: |
           chmod +x ./scripts/*.sh
           bash ./scripts/build.sh
