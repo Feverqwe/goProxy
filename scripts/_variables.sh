@@ -8,4 +8,4 @@ BINARY="goProxy"
 ICON_PATH="./assets/icon.icns"
 
 # Version variables (can be overridden by environment)
-VERSION=1.8.3
+VERSION=1.9.0
