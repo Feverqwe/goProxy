@@ -82,6 +82,12 @@ const (
 )
 
 func GetCurrentVersion() (string, error) {
+	// First check if version is set in environment variable
+	if version := os.Getenv("VERSION"); version != "" {
+		return version, nil
+	}
+
+	// Fallback to reading from file
 	file, err := os.Open(versionFile)
 	if err != nil {
 		return "", fmt.Errorf("failed to open version file: %v", err)
@@ -119,6 +125,7 @@ func UpdateVersionFile(newVersion string) error {
 	}
 
 	fmt.Printf("✓ Updated %s with version: %s\n", versionFile, newVersion)
+	fmt.Printf("💡 Don't forget to also set the VERSION environment variable if you want to use it\n")
 	return nil
 }
 

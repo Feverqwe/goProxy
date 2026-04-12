@@ -7,4 +7,4 @@ if "%VERSION%"=="" set VERSION=dev
 
 echo Building GoProxy version: %VERSION%
 
-go build -ldflags "-H=windowsgui"
+go build -ldflags "-H=windowsgui -X main.Version=$VERSION"

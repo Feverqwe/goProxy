@@ -18,7 +18,12 @@ import (
 	"github.com/txthinking/socks5"
 )
 
-var Version = "1.8.3"
+var Version = "dev"
+
+const (
+	LatestReleaseAPI = "https://api.github.com/repos/Feverqwe/goProxy/releases/latest"
+	ReleasesURL      = "https://github.com/Feverqwe/goProxy/releases"
+)
 
 func main() {
 	defaultConfigPath := config.GetConfigPath()
@@ -156,6 +161,8 @@ func main() {
 				reloadConfiguration("Manual reload from tray")
 			case <-trayManager.GetOpenConfigChan():
 				config.OpenConfigDirectory(*configPath, logger)
+			case <-trayManager.GetCheckUpdateChan():
+				tray.CheckForUpdates(Version, LatestReleaseAPI, ReleasesURL, logger)
 			case <-tickerManager.GetReloadChan():
 				reloadConfiguration("Periodic update")
 			}

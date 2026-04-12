@@ -9,16 +9,18 @@ import (
 )
 
 type TrayManager struct {
-	quitChan       chan struct{}
-	reloadChan     chan struct{}
-	openConfigChan chan struct{}
+	quitChan        chan struct{}
+	reloadChan      chan struct{}
+	openConfigChan  chan struct{}
+	checkUpdateChan chan struct{}
 }
 
 func NewTrayManager() *TrayManager {
 	return &TrayManager{
-		quitChan:       make(chan struct{}, 1),
-		reloadChan:     make(chan struct{}, 1),
-		openConfigChan: make(chan struct{}, 1),
+		quitChan:        make(chan struct{}, 1),
+		reloadChan:      make(chan struct{}, 1),
+		openConfigChan:  make(chan struct{}, 1),
+		checkUpdateChan: make(chan struct{}, 1),
 	}
 }
 
@@ -36,6 +38,10 @@ func (tm *TrayManager) GetReloadChan() <-chan struct{} {
 
 func (tm *TrayManager) GetOpenConfigChan() <-chan struct{} {
 	return tm.openConfigChan
+}
+
+func (tm *TrayManager) GetCheckUpdateChan() <-chan struct{} {
+	return tm.checkUpdateChan
 }
 
 func (tm *TrayManager) onReady() {
@@ -57,6 +63,7 @@ func (tm *TrayManager) createMenu() {
 	systray.AddSeparator()
 	reloadItem := systray.AddMenuItem("Reload config", "Reload configuration file")
 	openConfigItem := systray.AddMenuItem("Open config directory", "Open directory containing config file")
+	checkUpdateItem := systray.AddMenuItem("Check updates", "Check for new version")
 	systray.AddSeparator()
 
 	quitItem := systray.AddMenuItem("Quit", "Close app")
@@ -77,6 +84,15 @@ func (tm *TrayManager) createMenu() {
 			case tm.openConfigChan <- struct{}{}:
 			default:
 
+			}
+		}
+	}()
+
+	go func() {
+		for range checkUpdateItem.ClickedCh {
+			select {
+			case tm.checkUpdateChan <- struct{}{}:
+			default:
 			}
 		}
 	}()
