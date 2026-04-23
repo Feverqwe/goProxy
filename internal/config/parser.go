@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -55,8 +56,12 @@ func parseStringToList(input string, expandWildcardDomains bool) []string {
 }
 
 func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc, forceReload bool, ttl int) {
-	for i := range c.Rules {
-		rule := &c.Rules[i]
+	var wg sync.WaitGroup
+
+	handleRule := func(ruleIndex int) {
+		defer wg.Done()
+
+		rule := &c.Rules[ruleIndex]
 
 		var externalRule *RuleBaseConfig
 		if rule.ExternalRule != "" {
@@ -109,6 +114,13 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 			}
 		}
 	}
+
+	for i := range c.Rules {
+		wg.Add(1)
+		go handleRule(i)
+	}
+
+	wg.Wait()
 }
 
 func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc, forceReload bool, ttl int) (*RuleBaseConfig, error) {
