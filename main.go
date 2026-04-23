@@ -40,7 +40,7 @@ func main() {
 	cacheManager := cache.NewCacheManager()
 
 	configMutex := &sync.Mutex{}
-	currentConfig, err := config.LoadConfig(*configPath, cacheManager, nil, true, nil)
+	currentConfig, err := config.LoadConfig(*configPath, cacheManager, nil, true, nil, false)
 	if err != nil {
 		panic(err)
 	}
@@ -113,12 +113,13 @@ func main() {
 
 	tickerManager := ticker.NewTickerManager()
 
-	reloadConfiguration := func(trigger string) {
+	reloadConfiguration := func(trigger string, forceReload bool) {
 		configMutex.Lock()
 		defer configMutex.Unlock()
 
 		logger.Info("%s: reloading configuration...", trigger)
-		newConfig, err := currentConfig.ReloadConfig(proxyHandler.GetHTTPClient)
+
+		newConfig, err := currentConfig.ReloadConfig(proxyHandler.GetHTTPClient, forceReload)
 		if err != nil {
 			logger.Error("Error reloading configuration: %v", err)
 			return
@@ -151,20 +152,22 @@ func main() {
 			case sig := <-sigChan:
 				switch sig {
 				case syscall.SIGHUP:
-					reloadConfiguration("Received SIGHUP signal")
+					reloadConfiguration("Received SIGHUP signal", false)
 				case os.Interrupt, syscall.SIGTERM:
 					logger.Info("Received interrupt signal, shutting down...")
 					trayManager.Exit()
 					return
 				}
 			case <-trayManager.GetReloadChan():
-				reloadConfiguration("Manual reload from tray")
+				reloadConfiguration("Manual reload from tray", false)
+			case <-trayManager.GetReloadRulesChan():
+				reloadConfiguration("Force reload rules from tray", true)
 			case <-trayManager.GetOpenConfigChan():
 				config.OpenConfigDirectory(*configPath, logger)
 			case <-trayManager.GetCheckUpdateChan():
 				tray.CheckForUpdates(Version, LatestReleaseAPI, ReleasesURL, logger)
 			case <-tickerManager.GetReloadChan():
-				reloadConfiguration("Periodic update")
+				reloadConfiguration("Periodic update", false)
 			}
 		}
 	}()

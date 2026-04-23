@@ -54,14 +54,14 @@ func parseStringToList(input string, expandWildcardDomains bool) []string {
 	return result
 }
 
-func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc) {
+func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc, forceReload bool, ttl int) {
 	for i := range c.Rules {
 		rule := &c.Rules[i]
 
 		var externalRule *RuleBaseConfig
 		if rule.ExternalRule != "" {
 			var err error
-			externalRule, err = c.loadExternalRuleFile(rule.ExternalRule, configDir, cacheOnly, httpClientFunc)
+			externalRule, err = c.loadExternalRuleFile(rule.ExternalRule, configDir, cacheOnly, httpClientFunc, forceReload, ttl)
 			if err != nil {
 				c.logger.Warn("Failed to load external rule file: %v", err)
 			}
@@ -79,7 +79,7 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 				cleanToken := strings.TrimPrefix(t, "!")
 
 				if strings.HasPrefix(cleanToken, "http://") || strings.HasPrefix(cleanToken, "https://") || strings.HasPrefix(cleanToken, "/") || strings.HasPrefix(cleanToken, "./") {
-					list := c.loadExternalRuleList(cleanToken, expandWildcardDomains, configDir, cacheOnly, httpClientFunc)
+					list := c.loadExternalRuleList(cleanToken, expandWildcardDomains, configDir, cacheOnly, httpClientFunc, forceReload, ttl)
 					for _, line := range list {
 						if isNegation {
 							expanded = append(expanded, "!"+line)
@@ -111,12 +111,12 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 	}
 }
 
-func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc) (*RuleBaseConfig, error) {
+func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc, forceReload bool, ttl int) (*RuleBaseConfig, error) {
 	if source == "" {
 		return nil, nil
 	}
 
-	content, err := loadExternalRules(source, configDir, cacheOnly, httpClientFunc, c.logger)
+	content, err := loadExternalRules(source, configDir, cacheOnly, httpClientFunc, c.logger, forceReload, ttl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load external rule file: %v", err)
 	}
@@ -129,12 +129,12 @@ func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string, cach
 	return &externalRule, nil
 }
 
-func (c *ProxyConfig) loadExternalRuleList(url string, expandWildcardDomains bool, configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc) []string {
+func (c *ProxyConfig) loadExternalRuleList(url string, expandWildcardDomains bool, configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc, forceReload bool, ttl int) []string {
 	if url == "" {
 		return []string{}
 	}
 
-	rulesContent, err := loadExternalRules(url, configDir, cacheOnly, httpClientFunc, c.logger)
+	rulesContent, err := loadExternalRules(url, configDir, cacheOnly, httpClientFunc, c.logger, forceReload, ttl)
 	if err != nil {
 		c.logger.Warn("Failed to load external rules from %s: %v", url, err)
 		return []string{}

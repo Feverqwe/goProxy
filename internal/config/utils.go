@@ -79,12 +79,12 @@ func (c *ProxyConfig) GetMaxLogFiles() int {
 	return c.MaxLogFiles
 }
 
-func loadExternalRules(source string, baseDir string, cacheOnly bool, httpClientFunc HTTPClientFunc, logger *logging.Logger) (string, error) {
+func loadExternalRules(source string, baseDir string, cacheOnly bool, httpClientFunc HTTPClientFunc, logger *logging.Logger, forceReload bool, ttl int) (string, error) {
 	var filePath string
 	var err error
 
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
-		filePath, err = downloadAndCacheFile(source, cacheOnly, httpClientFunc, logger)
+		filePath, err = downloadAndCacheFile(source, cacheOnly, httpClientFunc, logger, forceReload, ttl)
 		if err != nil {
 			return "", err
 		}

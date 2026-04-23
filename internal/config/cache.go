@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -34,14 +36,27 @@ func getCacheFilePath(url string) string {
 	return filepath.Join(getCacheDir(), filename)
 }
 
-func downloadAndCacheFile(downloadURL string, cacheOnly bool, httpClientFunc HTTPClientFunc, logger *logging.Logger) (string, error) {
+func downloadAndCacheFile(downloadURL string, cacheOnly bool, httpClientFunc HTTPClientFunc, logger *logging.Logger, forceReload bool, ttl int) (string, error) {
 	cacheFile := getCacheFilePath(downloadURL)
 
+	cacheAvailable := false
+	if _, err := os.Stat(cacheFile); err == nil {
+		cacheAvailable = true
+	}
+
 	if cacheOnly {
-		if _, err := os.Stat(cacheFile); err == nil {
+		if cacheAvailable {
 			return cacheFile, nil
 		}
 		return "", fmt.Errorf("cached file not found for %s", downloadURL)
+	}
+
+	if cacheAvailable {
+		if shouldDownload, err := shouldDownloadFile(cacheFile, forceReload, ttl); err != nil {
+			logger.Warn("Failed to check cache TTL for %s: %v", downloadURL, err)
+		} else if !shouldDownload {
+			return cacheFile, nil
+		}
 	}
 
 	var client *http.Client
@@ -106,5 +121,45 @@ func downloadWithClient(downloadURL, cacheFile string, client *http.Client, logg
 		return "", fmt.Errorf("failed to rename temporary file to cache file: %v", err)
 	}
 
+	err = saveDownloadTimestamp(cacheFile)
+	if err != nil {
+		logger.Warn("Failed to save download timestamp for %s: %v", downloadURL, err)
+	}
+
 	return cacheFile, nil
+}
+
+func shouldDownloadFile(cacheFile string, forceReload bool, ttl int) (bool, error) {
+	if forceReload {
+		return true, nil
+	}
+
+	updatedAtFile := cacheFile + ".updated_at"
+	if _, err := os.Stat(cacheFile); err != nil {
+		return true, nil
+	}
+
+	content, err := os.ReadFile(updatedAtFile)
+	if err != nil {
+		return true, fmt.Errorf("failed to read timestamp file: %v", err)
+	}
+
+	timestampInt, err := strconv.ParseInt(strings.TrimSpace(string(content)), 10, 64)
+	if err != nil {
+		return true, fmt.Errorf("failed to parse Unix timestamp: %v", err)
+	}
+
+	expiresAt := timestampInt + int64(ttl)
+	currentTime := time.Now().Unix()
+	if currentTime > expiresAt {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func saveDownloadTimestamp(cacheFile string) error {
+	updatedAtFile := cacheFile + ".updated_at"
+	timestamp := time.Now().Unix()
+	return os.WriteFile(updatedAtFile, fmt.Appendf(nil, "%d", timestamp), 0644)
 }

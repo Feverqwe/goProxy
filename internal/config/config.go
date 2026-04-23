@@ -27,7 +27,7 @@ func defaultConfig() *ProxyConfig {
 	}
 }
 
-func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientFunc HTTPClientFunc, cacheOnly bool, logger *logging.Logger) (*ProxyConfig, error) {
+func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientFunc HTTPClientFunc, cacheOnly bool, logger *logging.Logger, forceReload bool) (*ProxyConfig, error) {
 	config := &ProxyConfig{}
 
 	if _, err := os.Stat(configPath); err == nil {
@@ -52,12 +52,12 @@ func LoadConfig(configPath string, cacheManager *cache.CacheManager, httpClientF
 	config.configPath = configPath
 	config.logger = logger
 
-	config.afterLoad(httpClientFunc, cacheOnly)
+	config.afterLoad(httpClientFunc, cacheOnly, forceReload, config.AutoReloadHours*3600)
 
 	return config, nil
 }
 
-func (c *ProxyConfig) afterLoad(httpClientFunc HTTPClientFunc, cacheOnly bool) {
+func (c *ProxyConfig) afterLoad(httpClientFunc HTTPClientFunc, cacheOnly bool, forceReload bool, ttl int) {
 	c.logLevelInt = parseLogLevel(c.LogLevel)
 
 	if c.logger == nil {
@@ -70,7 +70,7 @@ func (c *ProxyConfig) afterLoad(httpClientFunc HTTPClientFunc, cacheOnly bool) {
 
 	c.autoDetectInterfaceIPs()
 
-	c.preParseRuleLists(configDir, cacheOnly, httpClientFunc)
+	c.preParseRuleLists(configDir, cacheOnly, httpClientFunc, forceReload, ttl)
 
 	c.cache.PrecompilePatterns(c.getAllHosts(), c.getAllIps())
 }
@@ -99,6 +99,6 @@ func (c *ProxyConfig) GetLogLevelInt() int {
 	return c.logLevelInt
 }
 
-func (c *ProxyConfig) ReloadConfig(httpClientFunc HTTPClientFunc) (*ProxyConfig, error) {
-	return LoadConfig(c.configPath, c.cache, httpClientFunc, false, c.logger)
+func (c *ProxyConfig) ReloadConfig(httpClientFunc HTTPClientFunc, forceReload bool) (*ProxyConfig, error) {
+	return LoadConfig(c.configPath, c.cache, httpClientFunc, false, c.logger, forceReload)
 }
