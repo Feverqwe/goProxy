@@ -16,4 +16,3 @@ goProxy
 /build/
 goProxy.app/
 *.log
-repomix-output.md
