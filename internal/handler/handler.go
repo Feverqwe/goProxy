@@ -35,6 +35,26 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 	return c.reader.Read(p)
 }
 
+func (c *bufferedConn) CloseWrite() error {
+	if conn, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return conn.CloseWrite()
+	}
+	return fmt.Errorf("connection type %T does not support CloseWrite", c.Conn)
+}
+
+func (c *bufferedConn) CloseRead() error {
+	if conn, ok := c.Conn.(interface{ CloseRead() error }); ok {
+		return conn.CloseRead()
+	}
+	return nil
+}
+
+// socks5DialerWithConn matches the SOCKS5 implementation returned by
+// proxy.FromURL and lets the handshake run on a native TCP connection.
+type socks5DialerWithConn interface {
+	DialWithConn(context.Context, net.Conn, string, string) (net.Addr, error)
+}
+
 type ProxyHandler struct {
 	decision    *ProxyDecision
 	proxyServer *goproxy.ProxyHttpServer
@@ -155,20 +175,36 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 
 	switch parsedURL.Scheme {
 	case "socks5", "socks5h":
-		var auth *proxy.Auth
-		if parsedURL.User != nil {
-			auth = &proxy.Auth{
-				User: parsedURL.User.Username(),
-			}
-			if password, ok := parsedURL.User.Password(); ok {
-				auth.Password = password
-			}
-		}
-		proxyDialer, err := proxy.SOCKS5("tcp", parsedURL.Host, auth, dialer)
+		proxyDialer, err := proxy.FromURL(parsedURL, dialer)
 		if err != nil {
 			return nil, fmt.Errorf("error creating SOCKS5 dialer: %w", err)
 		}
-		return proxyDialer.Dial(network, addr)
+		connectionDialer, ok := proxyDialer.(socks5DialerWithConn)
+		if !ok {
+			return nil, fmt.Errorf("SOCKS5 dialer does not support handshaking an existing connection")
+		}
+		proxyAddr, err := socks5ProxyAddress(parsedURL)
+		if err != nil {
+			return nil, err
+		}
+
+		dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		conn, err := dialer.DialContext(dialCtx, "tcp", proxyAddr)
+		if err != nil {
+			return nil, fmt.Errorf("error connecting to SOCKS5 proxy: %w", err)
+		}
+		closeConn := true
+		defer func() {
+			if closeConn {
+				conn.Close()
+			}
+		}()
+		if _, err := connectionDialer.DialWithConn(dialCtx, conn, network, addr); err != nil {
+			return nil, err
+		}
+		closeConn = false
+		return conn, nil
 	case "http", "https":
 		conn, err := dialer.DialContext(ctx, "tcp", parsedURL.Host)
 		if err != nil {

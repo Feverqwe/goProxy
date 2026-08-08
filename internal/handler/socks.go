@@ -119,29 +119,52 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 		return err
 	}
 
+	return proxyTCPConnections(conn, remote)
+}
+
+func proxyTCPConnections(left, right net.Conn) error {
 	errCh := make(chan error, 2)
 
 	var once sync.Once
 	closeBoth := func() {
 		once.Do(func() {
-			remote.Close()
-			conn.Close()
+			right.Close()
+			left.Close()
 		})
 	}
 
-	copyDir := func(dst io.Writer, src io.Reader) {
+	halfClose := func(dst, src net.Conn) bool {
+		closeWriter, ok := dst.(interface{ CloseWrite() error })
+		if !ok || closeWriter.CloseWrite() != nil {
+			return false
+		}
+		if closeReader, ok := src.(interface{ CloseRead() error }); ok {
+			_ = closeReader.CloseRead()
+		}
+		return true
+	}
+
+	copyDir := func(dst, src net.Conn) {
 		buf := bufferPool.Get().([]byte)
 		defer bufferPool.Put(buf)
 
 		_, err := io.CopyBuffer(dst, src, buf)
+		if err != nil || !halfClose(dst, src) {
+			closeBoth()
+		}
 		errCh <- err
-		closeBoth()
 	}
 
-	go copyDir(remote, conn)
-	go copyDir(conn, remote)
+	go copyDir(right, left)
+	go copyDir(left, right)
 
-	return <-errCh
+	var firstErr error
+	for range 2 {
+		if err := <-errCh; err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *socks5.Datagram) error {

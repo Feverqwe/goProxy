@@ -1,8 +1,22 @@
 package handler
 
 import (
+	"fmt"
 	"net"
+	"net/url"
 )
+
+func socks5ProxyAddress(proxyURL *url.URL) (string, error) {
+	host := proxyURL.Hostname()
+	if host == "" {
+		return "", fmt.Errorf("SOCKS5 proxy URL has no host")
+	}
+	port := proxyURL.Port()
+	if port == "" {
+		port = "1080"
+	}
+	return net.JoinHostPort(host, port), nil
+}
 
 func getSourceIpByIps(ips []net.IP, extIp4, extIp6 string) string {
 	for _, ip := range ips {
