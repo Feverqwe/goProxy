@@ -21,6 +21,8 @@ import (
 	"goProxy/internal/cache"
 	"goProxy/internal/config"
 	"goProxy/internal/logging"
+
+	"golang.org/x/net/dns/dnsmessage"
 )
 
 type testLoggerConfig struct{}
@@ -181,6 +183,143 @@ func TestGetTargetAndSourceIPUsesCompatibleFamily(t *testing.T) {
 	if !target.Equal(ips[0]) || source != "" {
 		t.Fatalf("unbound selection = (%v, %q), want first address without source", target, source)
 	}
+}
+
+func TestDirectDialDelegatesResolutionAndPreservesSourceBinding(t *testing.T) {
+	targetListener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen target: %v", err)
+	}
+	defer targetListener.Close()
+
+	dnsAddr := startTestDNSServer(t, []dnsmessage.AResource{
+		{A: [4]byte{127, 0, 0, 2}},
+		{A: [4]byte{127, 0, 0, 1}},
+	})
+
+	accepted := make(chan net.Conn, 1)
+	acceptErr := make(chan error, 1)
+	go func() {
+		conn, err := targetListener.Accept()
+		if err != nil {
+			acceptErr <- err
+			return
+		}
+		accepted <- conn
+	}()
+
+	cfg := &config.ProxyConfig{
+		DefaultProxy: "direct",
+		Proxies:      map[string]string{"direct": ""},
+		ExternalIp4:  "127.0.0.1",
+		ExternalIp6:  "::1",
+		ExternalDns:  dnsAddr,
+	}
+	handler := newTestProxyHandler(t, cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	ctx = context.WithValue(ctx, proxyURLContextKey, "")
+
+	_, port, err := net.SplitHostPort(targetListener.Addr().String())
+	if err != nil {
+		t.Fatalf("split target address: %v", err)
+	}
+	conn, err := handler.dialContext(ctx, "tcp", net.JoinHostPort("fallback.test", port))
+	if err != nil {
+		t.Fatalf("dial target through DNS fallback: %v", err)
+	}
+	defer conn.Close()
+
+	select {
+	case serverConn := <-accepted:
+		defer serverConn.Close()
+		remote, ok := serverConn.RemoteAddr().(*net.TCPAddr)
+		if !ok {
+			t.Fatalf("remote address type = %T, want *net.TCPAddr", serverConn.RemoteAddr())
+		}
+		if !remote.IP.Equal(net.ParseIP("127.0.0.1")) {
+			t.Fatalf("source IP = %s, want 127.0.0.1", remote.IP)
+		}
+	case err := <-acceptErr:
+		t.Fatalf("accept target connection: %v", err)
+	case <-ctx.Done():
+		t.Fatalf("accept target connection: %v", ctx.Err())
+	}
+}
+
+func startTestDNSServer(t *testing.T, answers []dnsmessage.AResource) string {
+	t.Helper()
+
+	server, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen DNS: %v", err)
+	}
+	t.Cleanup(func() { _ = server.Close() })
+
+	go func() {
+		buffer := make([]byte, 1500)
+		for {
+			n, clientAddr, err := server.ReadFrom(buffer)
+			if err != nil {
+				return
+			}
+
+			var parser dnsmessage.Parser
+			header, err := parser.Start(buffer[:n])
+			if err != nil {
+				t.Errorf("parse DNS header: %v", err)
+				return
+			}
+			question, err := parser.Question()
+			if err != nil {
+				t.Errorf("parse DNS question: %v", err)
+				return
+			}
+
+			builder := dnsmessage.NewBuilder(nil, dnsmessage.Header{
+				ID:                 header.ID,
+				Response:           true,
+				RecursionAvailable: true,
+			})
+			builder.EnableCompression()
+			if err := builder.StartQuestions(); err != nil {
+				t.Errorf("start DNS questions: %v", err)
+				return
+			}
+			if err := builder.Question(question); err != nil {
+				t.Errorf("add DNS question: %v", err)
+				return
+			}
+			if err := builder.StartAnswers(); err != nil {
+				t.Errorf("start DNS answers: %v", err)
+				return
+			}
+			if question.Type == dnsmessage.TypeA {
+				for _, answer := range answers {
+					header := dnsmessage.ResourceHeader{
+						Name:  question.Name,
+						Type:  dnsmessage.TypeA,
+						Class: dnsmessage.ClassINET,
+						TTL:   60,
+					}
+					if err := builder.AResource(header, answer); err != nil {
+						t.Errorf("add DNS answer: %v", err)
+						return
+					}
+				}
+			}
+			response, err := builder.Finish()
+			if err != nil {
+				t.Errorf("finish DNS response: %v", err)
+				return
+			}
+			if _, err := server.WriteTo(response, clientAddr); err != nil {
+				return
+			}
+		}
+	}()
+
+	return server.LocalAddr().String()
 }
 
 func TestProxyAddressDefaults(t *testing.T) {

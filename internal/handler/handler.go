@@ -162,52 +162,16 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 		return nil, fmt.Errorf("connection blocked by proxy configuration")
 	}
 
-	dialer := &net.Dialer{
-		Timeout:   10 * time.Second,
-		KeepAlive: 30 * time.Second,
-	}
-
 	if proxyURL == "" {
 		extIp4 := currentDecision.config.ExternalIp4
 		extIp6 := currentDecision.config.ExternalIp6
 		extDns := currentDecision.config.ExternalDns
+		return p.dialDirectContext(ctx, network, addr, extIp4, extIp6, extDns)
+	}
 
-		if extIp4 != "" || extIp6 != "" || extDns != "" {
-			host, port, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, fmt.Errorf("invalid address format %s: %w", addr, err)
-			}
-
-			ips, err := currentDecision.cache.ResolveExternalHost(host, extDns, func(ips []net.IP) string {
-				return getSourceIpByIps(ips, extIp4, extIp6)
-			})
-			if err != nil {
-				p.logger.Error("DNS Resolve Error for %s: %v", host, err)
-				return nil, err
-			}
-
-			if len(ips) == 0 {
-				return nil, fmt.Errorf("no IP addresses found for host: %s", host)
-			}
-
-			targetIP, sourceIP := getTargetAndSourceIp(ips, extIp4, extIp6)
-			if targetIP == nil {
-				return nil, fmt.Errorf("no IP addresses for %s are compatible with the configured source IPs", host)
-			}
-			if sourceIP != "" {
-				localAddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(sourceIP, "0"))
-				if err != nil {
-					return nil, fmt.Errorf("invalid TCP source IP %s: %w", sourceIP, err)
-				}
-				dialer.LocalAddr = localAddr
-				p.logger.Debug("Direct connection to %s bound to source IP: %s", addr, sourceIP)
-			}
-
-			targetAddr := net.JoinHostPort(targetIP.String(), port)
-			return dialer.DialContext(ctx, network, targetAddr)
-		}
-
-		return dialer.DialContext(ctx, network, addr)
+	dialer := &net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
 	}
 
 	parsedURL, err := url.Parse(proxyURL)
