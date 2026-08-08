@@ -3,6 +3,7 @@ package handler
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -35,10 +36,11 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 }
 
 type ProxyHandler struct {
-	decision    *ProxyDecision
-	proxyServer *goproxy.ProxyHttpServer
-	logger      *logging.Logger
-	mu          sync.RWMutex
+	decision       *ProxyDecision
+	proxyServer    *goproxy.ProxyHttpServer
+	proxyTLSConfig *tls.Config
+	logger         *logging.Logger
+	mu             sync.RWMutex
 }
 
 func NewProxyHandler(config *config.ProxyConfig, cacheManager *cache.CacheManager, logger *logging.Logger) *ProxyHandler {
@@ -51,18 +53,23 @@ func NewProxyHandler(config *config.ProxyConfig, cacheManager *cache.CacheManage
 	proxyServer.Logger = goproxyLogger
 
 	handler := &ProxyHandler{
-		decision:    decision,
-		proxyServer: proxyServer,
-		logger:      logger,
+		decision:       decision,
+		proxyServer:    proxyServer,
+		proxyTLSConfig: &tls.Config{},
+		logger:         logger,
 	}
 
 	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.Proxy = nil
 	tr.MaxIdleConns = 500
 	tr.MaxIdleConnsPerHost = 100
 	tr.IdleConnTimeout = 90 * time.Second
 	tr.ResponseHeaderTimeout = 10 * time.Second
 	tr.DialContext = handler.dialContext
 	proxyServer.Tr = tr
+	// NewProxyHttpServer may initialize ConnectDial from HTTPS_PROXY. Routing
+	// decisions must always go through dialContext instead.
+	proxyServer.ConnectDial = nil
 
 	return handler
 }
@@ -101,13 +108,13 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 		extIp6 := currentDecision.config.ExternalIp6
 		extDns := currentDecision.config.ExternalDns
 
-		if extIp4 != "" || extIp6 != "" {
+		if extIp4 != "" || extIp6 != "" || extDns != "" {
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
 				return nil, fmt.Errorf("invalid address format %s: %w", addr, err)
 			}
 
-			ips, err := p.decision.cache.ResolveExternalHost(host, extDns, func(ips []net.IP) string {
+			ips, err := currentDecision.cache.ResolveExternalHost(host, extDns, func(ips []net.IP) string {
 				return getSourceIpByIps(ips, extIp4, extIp6)
 			})
 			if err != nil {
@@ -119,18 +126,20 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 				return nil, fmt.Errorf("no IP addresses found for host: %s", host)
 			}
 
-			sourceIP := getSourceIpByIps(ips, extIp4, extIp6)
+			targetIP, sourceIP := getTargetAndSourceIp(ips, extIp4, extIp6)
+			if targetIP == nil {
+				return nil, fmt.Errorf("no IP addresses for %s are compatible with the configured source IPs", host)
+			}
 			if sourceIP != "" {
 				localAddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(sourceIP, "0"))
-				if err == nil {
-					dialer.LocalAddr = localAddr
-					p.logger.Debug("Direct connection to %s bound to source IP: %s", addr, sourceIP)
-				} else {
-					p.logger.Error("Failed to resolve LocalAddr %s: %v", sourceIP, err)
+				if err != nil {
+					return nil, fmt.Errorf("invalid TCP source IP %s: %w", sourceIP, err)
 				}
+				dialer.LocalAddr = localAddr
+				p.logger.Debug("Direct connection to %s bound to source IP: %s", addr, sourceIP)
 			}
 
-			targetAddr := net.JoinHostPort(ips[0].String(), port)
+			targetAddr := net.JoinHostPort(targetIP.String(), port)
 			return dialer.DialContext(ctx, network, targetAddr)
 		}
 
@@ -159,9 +168,25 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 		}
 		return proxyDialer.Dial(network, addr)
 	case "http", "https":
-		conn, err := dialer.DialContext(ctx, "tcp", parsedURL.Host)
+		proxyAddr, err := getProxyAddress(parsedURL)
 		if err != nil {
-			return nil, fmt.Errorf("error connecting to HTTP proxy: %w", err)
+			return nil, err
+		}
+
+		var conn net.Conn
+		if parsedURL.Scheme == "https" {
+			tlsConfig := p.proxyTLSConfig.Clone()
+			tlsConfig.ServerName = parsedURL.Hostname()
+			tlsDialer := &tls.Dialer{
+				NetDialer: dialer,
+				Config:    tlsConfig,
+			}
+			conn, err = tlsDialer.DialContext(ctx, "tcp", proxyAddr)
+		} else {
+			conn, err = dialer.DialContext(ctx, "tcp", proxyAddr)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error connecting to %s proxy: %w", strings.ToUpper(parsedURL.Scheme), err)
 		}
 
 		closeConn := true
@@ -288,16 +313,14 @@ func (p *ProxyHandler) GetHTTPClient(targetURL string) (*http.Client, error) {
 		return nil, fmt.Errorf("request blocked by proxy configuration")
 	}
 
-	var transport http.RoundTripper
+	transport := &roundTripperWithContext{
+		base:     p.proxyServer.Tr,
+		proxyURL: proxyURL,
+	}
 
 	if proxyURL == "" {
-		transport = http.DefaultTransport
 		p.logger.Info("HTTP Direct: %s to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
 	} else {
-		transport = &roundTripperWithContext{
-			base:     p.proxyServer.Tr,
-			proxyURL: proxyURL,
-		}
 		p.logger.Info("HTTP Proxy: %s to %s via proxy %s (rule: '%s')", capitalize(getRequestType(isHTTPS)), target, decisionResult.Proxy, decisionResult.RuleName)
 	}
 

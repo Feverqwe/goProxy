@@ -3,12 +3,13 @@ package handler
 import (
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 type UDPSession struct {
 	RemoteConn net.Conn
-	LastActive time.Time
+	lastActive atomic.Int64
 }
 
 type UDPSessionManager struct {
@@ -31,23 +32,31 @@ func (m *UDPSessionManager) Get(clientAddr string) (net.Conn, bool) {
 		return nil, false
 	}
 	s := val.(*UDPSession)
-	s.LastActive = time.Now()
+	s.touch()
 	return s.RemoteConn, true
 }
 
 func (m *UDPSessionManager) Set(clientAddr string, conn net.Conn) {
-	m.sessions.Store(clientAddr, &UDPSession{
-		RemoteConn: conn,
-		LastActive: time.Now(),
-	})
+	session := &UDPSession{RemoteConn: conn}
+	session.touch()
+	m.sessions.Store(clientAddr, session)
+}
+
+func (s *UDPSession) touch() {
+	s.lastActive.Store(time.Now().UnixNano())
+}
+
+func (s *UDPSession) expired(now time.Time, ttl time.Duration) bool {
+	return now.Sub(time.Unix(0, s.lastActive.Load())) > ttl
 }
 
 func (m *UDPSessionManager) cleanup() {
 	ticker := time.NewTicker(m.ttl / 2)
 	for range ticker.C {
+		now := time.Now()
 		m.sessions.Range(func(key, value interface{}) bool {
 			session := value.(*UDPSession)
-			if time.Since(session.LastActive) > m.ttl {
+			if session.expired(now, m.ttl) {
 				session.RemoteConn.Close()
 				m.sessions.Delete(key)
 			}

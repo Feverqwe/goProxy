@@ -41,6 +41,9 @@ func NewProxyDecision(config *config.ProxyConfig, cacheManager *cache.CacheManag
 }
 
 func (d *ProxyDecision) matchesGlob(pattern, s string) bool {
+	pattern = normalizeHost(pattern)
+	s = normalizeHost(s)
+
 	if pattern == s {
 		return true
 	}
@@ -54,6 +57,7 @@ func (d *ProxyDecision) matchesGlob(pattern, s string) bool {
 }
 
 func (d *ProxyDecision) GetProxyForHost(host string) (proxyURL string, decision ProxyDecisionResult, err error) {
+	host = normalizeHost(host)
 	decision = d.getProxyDecision(host)
 	var exists bool
 	proxyURL, exists = d.config.Proxies[decision.Proxy]
@@ -61,6 +65,12 @@ func (d *ProxyDecision) GetProxyForHost(host string) (proxyURL string, decision 
 		err = fmt.Errorf("proxy key '%s' not found in proxies map", decision.Proxy)
 	}
 	return
+}
+
+func normalizeHost(host string) string {
+	host = strings.TrimSpace(host)
+	host = strings.TrimSuffix(host, ".")
+	return strings.ToLower(host)
 }
 
 func (d *ProxyDecision) getProxyDecision(host string) ProxyDecisionResult {

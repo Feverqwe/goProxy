@@ -174,7 +174,7 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 			extIp6 := currentDecision.config.ExternalIp6
 			extDns := currentDecision.config.ExternalDns
 
-			if extIp4 == "" && extIp6 == "" {
+			if extIp4 == "" && extIp6 == "" && extDns == "" {
 				return s.defaultHandler.UDPHandle(server, addr, d)
 			}
 
@@ -194,12 +194,19 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 				return fmt.Errorf("no IP addresses found for host: %s", target)
 			}
 
-			sourceIP := getSourceIpByIps(ips, extIp4, extIp6)
+			targetIP, sourceIP := getTargetAndSourceIp(ips, extIp4, extIp6)
+			if targetIP == nil {
+				return fmt.Errorf("no IP addresses for %s are compatible with the configured source IPs", target)
+			}
 			if sourceIP != "" {
-				dialer.LocalAddr = &net.UDPAddr{IP: net.ParseIP(sourceIP), Port: 0}
+				sourceAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(sourceIP, "0"))
+				if err != nil {
+					return fmt.Errorf("invalid UDP source IP %s: %w", sourceIP, err)
+				}
+				dialer.LocalAddr = sourceAddr
 			}
 
-			targetIPAddr := net.JoinHostPort(ips[0].String(), port)
+			targetIPAddr := net.JoinHostPort(targetIP.String(), port)
 			upstreamConn, err = dialer.Dial("udp", targetIPAddr)
 			if err != nil {
 				s.logger.Error("SOCKS5 UDP Direct Dial Error: %v", err)
