@@ -31,8 +31,72 @@ type bufferedConn struct {
 	reader io.Reader
 }
 
+type capturingDialer struct {
+	dialer *net.Dialer
+	mu     sync.Mutex
+	conn   net.Conn
+}
+
+func (d *capturingDialer) Dial(network, address string) (net.Conn, error) {
+	return d.DialContext(context.Background(), network, address)
+}
+
+func (d *capturingDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	conn, err := d.dialer.DialContext(ctx, network, address)
+	if err != nil {
+		return nil, err
+	}
+	d.mu.Lock()
+	d.conn = conn
+	d.mu.Unlock()
+	return conn, nil
+}
+
+func (d *capturingDialer) connection() net.Conn {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.conn
+}
+
+type halfCloseConn struct {
+	net.Conn
+	halfCloser net.Conn
+}
+
+func (c *halfCloseConn) CloseWrite() error {
+	conn, ok := c.halfCloser.(interface{ CloseWrite() error })
+	if !ok {
+		return fmt.Errorf("connection type %T does not support CloseWrite", c.halfCloser)
+	}
+	return conn.CloseWrite()
+}
+
+func (c *halfCloseConn) CloseRead() error {
+	conn, ok := c.halfCloser.(interface{ CloseRead() error })
+	if !ok {
+		return nil
+	}
+	return conn.CloseRead()
+}
+
 func (c *bufferedConn) Read(p []byte) (int, error) {
 	return c.reader.Read(p)
+}
+
+func (c *bufferedConn) CloseWrite() error {
+	conn, ok := c.Conn.(interface{ CloseWrite() error })
+	if !ok {
+		return fmt.Errorf("connection type %T does not support CloseWrite", c.Conn)
+	}
+	return conn.CloseWrite()
+}
+
+func (c *bufferedConn) CloseRead() error {
+	conn, ok := c.Conn.(interface{ CloseRead() error })
+	if !ok {
+		return nil
+	}
+	return conn.CloseRead()
 }
 
 type ProxyHandler struct {
@@ -162,11 +226,27 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 				auth.Password = password
 			}
 		}
-		proxyDialer, err := proxy.SOCKS5("tcp", parsedURL.Host, auth, dialer)
+		capturingDialer := &capturingDialer{dialer: dialer}
+		proxyDialer, err := proxy.SOCKS5("tcp", parsedURL.Host, auth, capturingDialer)
 		if err != nil {
 			return nil, fmt.Errorf("error creating SOCKS5 dialer: %w", err)
 		}
-		return proxyDialer.Dial(network, addr)
+		contextDialer, ok := proxyDialer.(proxy.ContextDialer)
+		if !ok {
+			return nil, fmt.Errorf("SOCKS5 dialer does not support context cancellation")
+		}
+		dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		conn, err := contextDialer.DialContext(dialCtx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		rawConn := capturingDialer.connection()
+		if rawConn == nil {
+			conn.Close()
+			return nil, fmt.Errorf("SOCKS5 dialer did not expose its transport connection")
+		}
+		return &halfCloseConn{Conn: conn, halfCloser: rawConn}, nil
 	case "http", "https":
 		proxyAddr, err := getProxyAddress(parsedURL)
 		if err != nil {

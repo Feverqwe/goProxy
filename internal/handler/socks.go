@@ -119,29 +119,52 @@ func (s *SocksHandler) TCPHandle(server *socks5.Server, conn *net.TCPConn, r *so
 		return err
 	}
 
+	return proxyTCPConnections(conn, remote)
+}
+
+func proxyTCPConnections(left, right net.Conn) error {
 	errCh := make(chan error, 2)
 
 	var once sync.Once
 	closeBoth := func() {
 		once.Do(func() {
-			remote.Close()
-			conn.Close()
+			right.Close()
+			left.Close()
 		})
 	}
 
-	copyDir := func(dst io.Writer, src io.Reader) {
+	halfClose := func(dst, src net.Conn) bool {
+		closeWriter, ok := dst.(interface{ CloseWrite() error })
+		if !ok || closeWriter.CloseWrite() != nil {
+			return false
+		}
+		if closeReader, ok := src.(interface{ CloseRead() error }); ok {
+			_ = closeReader.CloseRead()
+		}
+		return true
+	}
+
+	copyDir := func(dst, src net.Conn) {
 		buf := bufferPool.Get().([]byte)
 		defer bufferPool.Put(buf)
 
 		_, err := io.CopyBuffer(dst, src, buf)
+		if err != nil || !halfClose(dst, src) {
+			closeBoth()
+		}
 		errCh <- err
-		closeBoth()
 	}
 
-	go copyDir(remote, conn)
-	go copyDir(conn, remote)
+	go copyDir(right, left)
+	go copyDir(left, right)
 
-	return <-errCh
+	var firstErr error
+	for range 2 {
+		if err := <-errCh; err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *socks5.Datagram) error {
@@ -164,19 +187,26 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 		return nil
 	}
 
-	upstreamConn, exists := s.udpManager.Get(clientKey)
+	extIp4 := currentDecision.config.ExternalIp4
+	extIp6 := currentDecision.config.ExternalIp6
+	extDns := currentDecision.config.ExternalDns
 
-	if !exists {
+	var parsedProxyURL *url.URL
+	if proxyURL == "" {
+		if extIp4 == "" && extIp6 == "" && extDns == "" {
+			return s.defaultHandler.UDPHandle(server, addr, d)
+		}
+	} else {
+		parsedProxyURL, err = url.Parse(proxyURL)
+		if err != nil || (parsedProxyURL.Scheme != "socks5" && parsedProxyURL.Scheme != "socks5h") {
+			s.logger.Warn("UDP Associate only supports SOCKS5 upstream. Falling back to direct for %s", target)
+			return s.defaultHandler.UDPHandle(server, addr, d)
+		}
+	}
+
+	session, err := s.udpManager.GetOrCreate(clientKey, func() (net.Conn, error) {
 		if proxyURL == "" {
 			s.logger.Info("SOCKS5 UDP Direct: %s (rule: %s)", target, decision.RuleName)
-
-			extIp4 := currentDecision.config.ExternalIp4
-			extIp6 := currentDecision.config.ExternalIp6
-			extDns := currentDecision.config.ExternalDns
-
-			if extIp4 == "" && extIp6 == "" && extDns == "" {
-				return s.defaultHandler.UDPHandle(server, addr, d)
-			}
 
 			dialer := net.Dialer{
 				Timeout: 10 * time.Second,
@@ -187,77 +217,84 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 			})
 			if err != nil {
 				s.logger.Error("SOCKS5 UDP DNS Resolve Error for %s: %v", target, err)
-				return err
+				return nil, err
 			}
 
 			if len(ips) == 0 {
-				return fmt.Errorf("no IP addresses found for host: %s", target)
+				return nil, fmt.Errorf("no IP addresses found for host: %s", target)
 			}
 
 			targetIP, sourceIP := getTargetAndSourceIp(ips, extIp4, extIp6)
 			if targetIP == nil {
-				return fmt.Errorf("no IP addresses for %s are compatible with the configured source IPs", target)
+				return nil, fmt.Errorf("no IP addresses for %s are compatible with the configured source IPs", target)
 			}
 			if sourceIP != "" {
 				sourceAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(sourceIP, "0"))
 				if err != nil {
-					return fmt.Errorf("invalid UDP source IP %s: %w", sourceIP, err)
+					return nil, fmt.Errorf("invalid UDP source IP %s: %w", sourceIP, err)
 				}
 				dialer.LocalAddr = sourceAddr
 			}
 
 			targetIPAddr := net.JoinHostPort(targetIP.String(), port)
-			upstreamConn, err = dialer.Dial("udp", targetIPAddr)
+			upstreamConn, err := dialer.Dial("udp", targetIPAddr)
 			if err != nil {
 				s.logger.Error("SOCKS5 UDP Direct Dial Error: %v", err)
-				return err
+				return nil, err
 			}
-		} else {
-			s.logger.Info("SOCKS5 UDP Proxy: %s via %s (rule: %s)", target, decision.Proxy, decision.RuleName)
-
-			parsedURL, err := url.Parse(proxyURL)
-			if err != nil || (parsedURL.Scheme != "socks5" && parsedURL.Scheme != "socks5h") {
-				s.logger.Warn("UDP Associate only supports SOCKS5 upstream. Falling back to direct for %s", target)
-				return s.defaultHandler.UDPHandle(server, addr, d)
-			}
-
-			user, pass := "", ""
-			if parsedURL.User != nil {
-				user = parsedURL.User.Username()
-				pass, _ = parsedURL.User.Password()
-			}
-
-			client, err := socks5.NewClient(parsedURL.Host, user, pass, 30, 30)
-			if err != nil {
-				s.logger.Error("SOCKS5 UDP Client Error: %v", err)
-				return err
-			}
-
-			upstreamConn, err = client.Dial("udp", targetHost)
-			if err != nil {
-				s.logger.Error("SOCKS5 UDP Upstream Dial Error: %v", err)
-				return err
-			}
+			return upstreamConn, nil
 		}
 
-		s.udpManager.Set(clientKey, upstreamConn)
-		go s.listenUpstreamUDP(server, addr, targetHost, upstreamConn, clientKey)
+		s.logger.Info("SOCKS5 UDP Proxy: %s via %s (rule: %s)", target, decision.Proxy, decision.RuleName)
+		user, pass := "", ""
+		if parsedProxyURL.User != nil {
+			user = parsedProxyURL.User.Username()
+			pass, _ = parsedProxyURL.User.Password()
+		}
+
+		client, err := socks5.NewClient(parsedProxyURL.Host, user, pass, 30, 0)
+		if err != nil {
+			s.logger.Error("SOCKS5 UDP Client Error: %v", err)
+			return nil, err
+		}
+		upstreamConn, err := client.Dial("udp", targetHost)
+		if err != nil {
+			s.logger.Error("SOCKS5 UDP Upstream Dial Error: %v", err)
+			return nil, err
+		}
+		return upstreamConn, nil
+	})
+	if err != nil {
+		return err
 	}
 
+	upstreamConn, sessionOpen := session.conn()
+	if !sessionOpen {
+		return fmt.Errorf("SOCKS5 UDP session closed during use")
+	}
+	session.startListener(func() {
+		go s.listenUpstreamUDP(server, addr, targetHost, session, clientKey)
+	})
+
+	if err := upstreamConn.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		s.udpManager.Delete(clientKey, session)
+		return err
+	}
 	_, err = upstreamConn.Write(d.Data)
 	if err != nil {
 		s.logger.Debug("SOCKS5 UDP Write Error: %v", err)
-		s.udpManager.sessions.Delete(clientKey)
-		upstreamConn.Close()
+		s.udpManager.Delete(clientKey, session)
 	}
 	return err
 }
 
-func (s *SocksHandler) listenUpstreamUDP(server *socks5.Server, clientAddr *net.UDPAddr, target string, upstream net.Conn, clientKey string) {
-	defer func() {
-		upstream.Close()
-		s.udpManager.sessions.Delete(clientKey)
-	}()
+func (s *SocksHandler) listenUpstreamUDP(server *socks5.Server, clientAddr *net.UDPAddr, target string, session *UDPSession, clientKey string) {
+	defer s.udpManager.Delete(clientKey, session)
+
+	upstream, ok := session.conn()
+	if !ok {
+		return
+	}
 
 	buf := make([]byte, 65507)
 	atyp, dstIP, dstPort, err := socks5.ParseAddress(target)

@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"goProxy/internal/cache"
 	"goProxy/internal/config"
 	"goProxy/internal/logging"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	explru "github.com/hashicorp/golang-lru/v2/expirable"
 )
 
@@ -20,23 +20,24 @@ type ProxyDecisionResult struct {
 }
 
 type ProxyDecision struct {
-	config    *config.ProxyConfig
-	cache     *cache.CacheManager
-	hostCache *lru.Cache[string, ProxyDecisionResult]
-	ipCache   *explru.LRU[string, ProxyDecisionResult]
-	logger    *logging.Logger
+	config        *config.ProxyConfig
+	cache         *cache.CacheManager
+	decisionCache *explru.LRU[string, ProxyDecisionResult]
+	logger        *logging.Logger
 }
 
 func NewProxyDecision(config *config.ProxyConfig, cacheManager *cache.CacheManager, logger *logging.Logger) *ProxyDecision {
-	hostCache, _ := lru.New[string, ProxyDecisionResult](1000)
-	ipCache := explru.NewLRU[string, ProxyDecisionResult](1000, nil, cache.IPResolutionTTL)
+	return newProxyDecision(config, cacheManager, logger, cache.IPResolutionTTL)
+}
+
+func newProxyDecision(config *config.ProxyConfig, cacheManager *cache.CacheManager, logger *logging.Logger, ttl time.Duration) *ProxyDecision {
+	decisionCache := explru.NewLRU[string, ProxyDecisionResult](1000, nil, ttl)
 
 	return &ProxyDecision{
-		config:    config,
-		cache:     cacheManager,
-		hostCache: hostCache,
-		ipCache:   ipCache,
-		logger:    logger,
+		config:        config,
+		cache:         cacheManager,
+		decisionCache: decisionCache,
+		logger:        logger,
 	}
 }
 
@@ -74,24 +75,13 @@ func normalizeHost(host string) string {
 }
 
 func (d *ProxyDecision) getProxyDecision(host string) ProxyDecisionResult {
-	if result, exists := d.hostCache.Get(host); exists {
+	if result, exists := d.decisionCache.Get(host); exists {
 		d.logger.Debug("Host cache hit for %s: proxy=%s, rule=%s", host, result.Proxy, result.RuleName)
 		return result
 	}
 
-	if result, exists := d.ipCache.Get(host); exists {
-		d.logger.Debug("IP cache hit for %s: proxy=%s, rule=%s", host, result.Proxy, result.RuleName)
-		return result
-	}
-
 	result := d.evaluateRules(host)
-
-	switch result.MatchType {
-	case "ip":
-		d.ipCache.Add(host, result)
-	default:
-		d.hostCache.Add(host, result)
-	}
+	d.decisionCache.Add(host, result)
 
 	return result
 }

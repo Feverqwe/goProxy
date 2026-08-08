@@ -4,6 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -204,8 +208,9 @@ func TestProxyAddressDefaults(t *testing.T) {
 }
 
 func TestUDPSessionActivityIsConcurrentSafe(t *testing.T) {
-	session := &UDPSession{}
-	session.touch()
+	conn, peer := net.Pipe()
+	defer peer.Close()
+	session := newUDPSession(conn)
 
 	var wg sync.WaitGroup
 	for range 8 {
@@ -213,18 +218,354 @@ func TestUDPSessionActivityIsConcurrentSafe(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range 1_000 {
-				session.touch()
-				_ = session.expired(time.Now(), time.Minute)
+				if !session.touch() {
+					return
+				}
+				_, _ = session.conn()
 			}
 		}()
 	}
 	wg.Wait()
 
-	if session.expired(time.Now(), time.Minute) {
-		t.Fatal("freshly touched session is expired")
+	if session.closeIfExpired(time.Now(), time.Minute) {
+		t.Fatal("freshly touched session was closed as expired")
 	}
-	session.lastActive.Store(time.Now().Add(-2 * time.Minute).UnixNano())
-	if !session.expired(time.Now(), time.Minute) {
-		t.Fatal("old session is not expired")
+	session.mu.Lock()
+	session.lastActive = time.Now().Add(-2 * time.Minute)
+	session.mu.Unlock()
+	if !session.closeIfExpired(time.Now(), time.Minute) {
+		t.Fatal("old session was not closed")
+	}
+	if session.touch() {
+		t.Fatal("closed session became active again")
+	}
+}
+
+func TestUDPSessionManagerGetOrCreateIsAtomic(t *testing.T) {
+	manager := &UDPSessionManager{ttl: time.Minute}
+
+	const workers = 16
+	results := make(chan *UDPSession, workers)
+	start := make(chan struct{})
+	var createCount atomic.Int32
+	var peersMu sync.Mutex
+	var peers []net.Conn
+	createConn := func() (net.Conn, error) {
+		createCount.Add(1)
+		conn, peer := net.Pipe()
+		peersMu.Lock()
+		peers = append(peers, peer)
+		peersMu.Unlock()
+		return conn, nil
+	}
+
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			session, err := manager.GetOrCreate("client->target", createConn)
+			if err != nil {
+				t.Errorf("GetOrCreate: %v", err)
+				return
+			}
+			results <- session
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	defer func() {
+		for _, peer := range peers {
+			peer.Close()
+		}
+	}()
+
+	if got := createCount.Load(); got != 1 {
+		t.Fatalf("connection creations = %d, want 1", got)
+	}
+	var winner *UDPSession
+	for session := range results {
+		if winner == nil {
+			winner = session
+		}
+		if session != winner {
+			t.Fatal("concurrent GetOrCreate returned different sessions")
+		}
+	}
+	current, ok := manager.Get("client->target")
+	if !ok || current != winner {
+		t.Fatal("manager did not retain the single winning session")
+	}
+	manager.Delete("client->target", winner)
+	if _, ok := manager.Get("client->target"); ok {
+		t.Fatal("deleted session is still available")
+	}
+
+	newConn, newPeer := net.Pipe()
+	defer newPeer.Close()
+	replacement, loaded := manager.LoadOrStore("client->target", newConn)
+	if loaded {
+		t.Fatal("replacement session unexpectedly reused an old session")
+	}
+	manager.Delete("client->target", winner)
+	current, ok = manager.Get("client->target")
+	if !ok || current != replacement {
+		t.Fatal("deleting an old session removed its replacement")
+	}
+	manager.Delete("client->target", replacement)
+}
+
+func TestExpiredLRUReevaluatesProxyDecision(t *testing.T) {
+	cfg := &config.ProxyConfig{
+		DefaultProxy: "direct",
+		Proxies: map[string]string{
+			"direct": "",
+			"block":  "#",
+		},
+	}
+	logger := logging.NewLogger(testLoggerConfig{})
+	t.Cleanup(func() { _ = logger.Close() })
+	decision := newProxyDecision(cfg, cache.NewCacheManager(), logger, 20*time.Millisecond)
+
+	proxyURL, _, err := decision.GetProxyForHost("cache.example")
+	if err != nil || proxyURL != "" {
+		t.Fatalf("initial decision = %q, %v; want direct", proxyURL, err)
+	}
+	cfg.DefaultProxy = "block"
+	proxyURL, _, err = decision.GetProxyForHost("cache.example")
+	if err != nil || proxyURL != "" {
+		t.Fatalf("cached decision = %q, %v; want direct", proxyURL, err)
+	}
+	time.Sleep(30 * time.Millisecond)
+	proxyURL, _, err = decision.GetProxyForHost("cache.example")
+	if err != nil || proxyURL != "#" {
+		t.Fatalf("expired decision = %q, %v; want block", proxyURL, err)
+	}
+}
+
+func TestSOCKS5HandshakeHonorsContext(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = io.Copy(io.Discard, conn)
+	}()
+
+	cfg := &config.ProxyConfig{
+		DefaultProxy: "direct",
+		Proxies:      map[string]string{"direct": ""},
+	}
+	handler := newTestProxyHandler(t, cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	ctx = context.WithValue(ctx, proxyURLContextKey, "socks5://"+listener.Addr().String())
+
+	started := time.Now()
+	_, err = handler.dialContext(ctx, "tcp", "target.example:443")
+	var netErr net.Error
+	if !errors.Is(err, context.DeadlineExceeded) && (!errors.As(err, &netErr) || !netErr.Timeout()) {
+		t.Fatalf("dial error = %v, want a context-related timeout", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("SOCKS5 handshake cancellation took %s", elapsed)
+	}
+}
+
+func TestSOCKS5UpstreamConnectionSupportsHalfClose(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+	serverResult := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			serverResult <- err
+			return
+		}
+		defer conn.Close()
+
+		negotiation := make([]byte, 3)
+		if _, err := io.ReadFull(conn, negotiation); err != nil {
+			serverResult <- err
+			return
+		}
+		if _, err := conn.Write([]byte{0x05, 0x00}); err != nil {
+			serverResult <- err
+			return
+		}
+
+		requestHeader := make([]byte, 4)
+		if _, err := io.ReadFull(conn, requestHeader); err != nil {
+			serverResult <- err
+			return
+		}
+		addressLength := 0
+		switch requestHeader[3] {
+		case 0x01:
+			addressLength = net.IPv4len
+		case 0x04:
+			addressLength = net.IPv6len
+		case 0x03:
+			length := make([]byte, 1)
+			if _, err := io.ReadFull(conn, length); err != nil {
+				serverResult <- err
+				return
+			}
+			addressLength = int(length[0])
+		default:
+			serverResult <- fmt.Errorf("unexpected SOCKS address type %d", requestHeader[3])
+			return
+		}
+		if _, err := io.ReadFull(conn, make([]byte, addressLength+2)); err != nil {
+			serverResult <- err
+			return
+		}
+		if _, err := conn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
+			serverResult <- err
+			return
+		}
+
+		payload, err := io.ReadAll(conn)
+		if err != nil {
+			serverResult <- err
+			return
+		}
+		if string(payload) != "request" {
+			serverResult <- fmt.Errorf("payload = %q, want request", payload)
+			return
+		}
+		if _, err := conn.Write([]byte("response")); err != nil {
+			serverResult <- err
+			return
+		}
+		serverResult <- conn.(*net.TCPConn).CloseWrite()
+	}()
+
+	cfg := &config.ProxyConfig{
+		DefaultProxy: "direct",
+		Proxies:      map[string]string{"direct": ""},
+	}
+	handler := newTestProxyHandler(t, cfg)
+	ctx := context.WithValue(context.Background(), proxyURLContextKey, "socks5://"+listener.Addr().String())
+	conn, err := handler.dialContext(ctx, "tcp", "target.example:443")
+	if err != nil {
+		t.Fatalf("dial through SOCKS5: %v", err)
+	}
+	defer conn.Close()
+	closeWriter, ok := conn.(interface{ CloseWrite() error })
+	if !ok {
+		t.Fatalf("connection type %T does not support CloseWrite", conn)
+	}
+	if _, err := conn.Write([]byte("request")); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	if err := closeWriter.CloseWrite(); err != nil {
+		t.Fatalf("half-close SOCKS5 tunnel: %v", err)
+	}
+	response, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if string(response) != "response" {
+		t.Fatalf("response = %q, want response", response)
+	}
+	if err := <-serverResult; err != nil {
+		t.Fatalf("SOCKS5 server: %v", err)
+	}
+}
+
+func TestProxyTCPConnectionsPreservesHalfClose(t *testing.T) {
+	leftPeer, leftProxy := tcpConnectionPair(t)
+	rightProxy, rightPeer := tcpConnectionPair(t)
+	defer leftPeer.Close()
+	defer leftProxy.Close()
+	defer rightProxy.Close()
+	defer rightPeer.Close()
+
+	proxyResult := make(chan error, 1)
+	go func() {
+		proxyResult <- proxyTCPConnections(leftProxy, rightProxy)
+	}()
+
+	rightResult := make(chan error, 1)
+	go func() {
+		request, err := io.ReadAll(rightPeer)
+		if err != nil {
+			rightResult <- err
+			return
+		}
+		if string(request) != "request" {
+			rightResult <- fmt.Errorf("request = %q, want request", request)
+			return
+		}
+		if _, err := rightPeer.Write([]byte("response")); err != nil {
+			rightResult <- err
+			return
+		}
+		rightResult <- rightPeer.(*net.TCPConn).CloseWrite()
+	}()
+
+	if _, err := leftPeer.Write([]byte("request")); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	if err := leftPeer.(*net.TCPConn).CloseWrite(); err != nil {
+		t.Fatalf("half-close request: %v", err)
+	}
+	response, err := io.ReadAll(leftPeer)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if string(response) != "response" {
+		t.Fatalf("response = %q, want response", response)
+	}
+	if err := <-rightResult; err != nil {
+		t.Fatalf("right peer: %v", err)
+	}
+	if err := <-proxyResult; err != nil {
+		t.Fatalf("proxy: %v", err)
+	}
+}
+
+func tcpConnectionPair(t *testing.T) (net.Conn, net.Conn) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	acceptErr := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			acceptErr <- err
+			return
+		}
+		accepted <- conn
+	}()
+
+	client, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	select {
+	case server := <-accepted:
+		return client, server
+	case err := <-acceptErr:
+		client.Close()
+		t.Fatalf("accept: %v", err)
+		return nil, nil
 	}
 }
