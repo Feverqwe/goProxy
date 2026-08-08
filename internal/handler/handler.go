@@ -58,12 +58,16 @@ func NewProxyHandler(config *config.ProxyConfig, cacheManager *cache.CacheManage
 	}
 
 	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.Proxy = nil
 	tr.MaxIdleConns = 500
 	tr.MaxIdleConnsPerHost = 100
 	tr.IdleConnTimeout = 90 * time.Second
 	tr.ResponseHeaderTimeout = 10 * time.Second
 	tr.DialContext = handler.dialContext
 	proxyServer.Tr = tr
+	// NewProxyHttpServer may initialize ConnectDial from HTTPS_PROXY. Routing
+	// decisions must always go through dialContext instead.
+	proxyServer.ConnectDial = nil
 
 	return handler
 }
@@ -295,16 +299,14 @@ func (p *ProxyHandler) GetHTTPClient(targetURL string) (*http.Client, error) {
 		return nil, fmt.Errorf("request blocked by proxy configuration")
 	}
 
-	var transport http.RoundTripper
+	transport := &roundTripperWithContext{
+		base:     p.proxyServer.Tr,
+		proxyURL: proxyURL,
+	}
 
 	if proxyURL == "" {
-		transport = http.DefaultTransport
 		p.logger.Info("HTTP Direct: %s to %s (rule: '%s', proxy: '%s')", getRequestType(isHTTPS), target, decisionResult.RuleName, decisionResult.Proxy)
 	} else {
-		transport = &roundTripperWithContext{
-			base:     p.proxyServer.Tr,
-			proxyURL: proxyURL,
-		}
 		p.logger.Info("HTTP Proxy: %s to %s via proxy %s (rule: '%s')", capitalize(getRequestType(isHTTPS)), target, decisionResult.Proxy, decisionResult.RuleName)
 	}
 
