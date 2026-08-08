@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/elazarl/goproxy"
@@ -116,57 +115,11 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 		return nil, fmt.Errorf("connection blocked by proxy configuration")
 	}
 
-	dialer := &net.Dialer{
-		Timeout:   10 * time.Second,
-		KeepAlive: 30 * time.Second,
-		ControlContext: func(ctx context.Context, network, address string, _ syscall.RawConn) error {
-			if currentDecision.selfGuard.isSelfConnection(address) {
-				return fmt.Errorf("refusing to connect proxy to itself at %s", address)
-			}
-			return nil
-		},
-	}
-
 	if proxyURL == "" {
-		extIp4 := currentDecision.config.ExternalIp4
-		extIp6 := currentDecision.config.ExternalIp6
-		extDns := currentDecision.config.ExternalDns
-
-		if extIp4 != "" || extIp6 != "" {
-			host, port, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, fmt.Errorf("invalid address format %s: %w", addr, err)
-			}
-
-			ips, err := p.decision.cache.ResolveExternalHost(host, extDns, func(ips []net.IP) string {
-				return getSourceIpByIps(ips, extIp4, extIp6)
-			})
-			if err != nil {
-				p.logger.Error("DNS Resolve Error for %s: %v", host, err)
-				return nil, err
-			}
-
-			if len(ips) == 0 {
-				return nil, fmt.Errorf("no IP addresses found for host: %s", host)
-			}
-
-			sourceIP := getSourceIpByIps(ips, extIp4, extIp6)
-			if sourceIP != "" {
-				localAddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(sourceIP, "0"))
-				if err == nil {
-					dialer.LocalAddr = localAddr
-					p.logger.Debug("Direct connection to %s bound to source IP: %s", addr, sourceIP)
-				} else {
-					p.logger.Error("Failed to resolve LocalAddr %s: %v", sourceIP, err)
-				}
-			}
-
-			targetAddr := net.JoinHostPort(ips[0].String(), port)
-			return dialer.DialContext(ctx, network, targetAddr)
-		}
-
-		return dialer.DialContext(ctx, network, addr)
+		return newDirectRouteDialer(currentDecision, p.logger).DialContext(ctx, network, addr)
 	}
+
+	dialer := newTCPDialer(nil, currentDecision.selfGuard)
 
 	parsedURL, err := url.Parse(proxyURL)
 	if err != nil {

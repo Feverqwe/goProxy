@@ -18,29 +18,39 @@ func socks5ProxyAddress(proxyURL *url.URL) (string, error) {
 	return net.JoinHostPort(host, port), nil
 }
 
-func getSourceIpByIps(ips []net.IP, extIp4, extIp6 string) string {
+func getTargetAndSourceIp(ips []net.IP, extIp4, extIp6 string) (net.IP, string) {
 	for _, ip := range ips {
+		if ip == nil {
+			continue
+		}
 		isV4 := ip.To4() != nil
 
 		if isV4 && extIp4 != "" {
-			return extIp4
+			return ip, extIp4
 		}
 		if !isV4 && extIp6 != "" {
-			return extIp6
+			return ip, extIp6
 		}
 	}
 
-	return ""
-}
-
-func (s *ProxyHandler) getSourceIp(addr string, extDns, extIp4, extIp6 string) (string, error) {
-	host, _, _ := net.SplitHostPort(addr)
-	ips, err := s.decision.cache.ResolveExternalHost(host, extDns, func(ips []net.IP) string {
-		return getSourceIpByIps(ips, extIp4, extIp6)
-	})
-	if err != nil {
-		return "", err
+	if extIp4 == "" && extIp6 == "" {
+		for _, ip := range ips {
+			if ip != nil {
+				return ip, ""
+			}
+		}
 	}
 
-	return getSourceIpByIps(ips, extIp4, extIp6), nil
+	return nil, ""
+}
+
+func parseSourceIP(sourceIP string, wantIPv4 bool) (net.IP, error) {
+	ip := net.ParseIP(sourceIP)
+	if ip == nil {
+		return nil, fmt.Errorf("invalid source IP %s", sourceIP)
+	}
+	if wantIPv4 != (ip.To4() != nil) {
+		return nil, fmt.Errorf("source IP %s has the wrong address family", sourceIP)
+	}
+	return ip, nil
 }

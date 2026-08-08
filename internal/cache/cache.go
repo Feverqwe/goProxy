@@ -3,7 +3,6 @@ package cache
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -15,7 +14,8 @@ import (
 )
 
 const (
-	IPResolutionTTL = 5 * time.Minute
+	IPResolutionTTL  = 5 * time.Minute
+	dnsLookupTimeout = 10 * time.Second
 )
 
 type CacheManager struct {
@@ -24,6 +24,19 @@ type CacheManager struct {
 	dnsCache  *lru.LRU[string, []net.IP]
 	dnsGroup  singleflight.Group
 	mu        sync.RWMutex
+}
+
+type ExternalDNSOptions struct {
+	Server     string
+	SourceIPv4 string
+	SourceIPv6 string
+}
+
+type externalDNSParameters struct {
+	cacheKey  string
+	flightKey string
+	dnsAddr   string
+	sourceIP  net.IP
 }
 
 func NewCacheManager() *CacheManager {
@@ -90,115 +103,144 @@ func (c *CacheManager) GetCIDRNet(cidr string) (*net.IPNet, error) {
 }
 
 func (c *CacheManager) ResolveHost(hostname string) ([]net.IP, error) {
+	return c.ResolveHostContext(context.Background(), hostname)
+}
+
+func (c *CacheManager) ResolveHostContext(ctx context.Context, hostname string) ([]net.IP, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if ip := net.ParseIP(hostname); ip != nil {
 		return []net.IP{ip}, nil
 	}
 
-	if ips, exists := c.dnsCache.Get(hostname); exists {
-		return ips, nil
+	return c.resolveCached(ctx, hostname, hostname, func(lookupCtx context.Context) ([]net.IP, error) {
+		return net.DefaultResolver.LookupIP(lookupCtx, "ip", hostname)
+	})
+}
+
+func cloneIPs(ips []net.IP) []net.IP {
+	cloned := make([]net.IP, len(ips))
+	for i, ip := range ips {
+		cloned[i] = append(net.IP(nil), ip...)
+	}
+	return cloned
+}
+
+func (c *CacheManager) ResolveExternalHost(hostname string, options ExternalDNSOptions) ([]net.IP, error) {
+	return c.ResolveExternalHostContext(context.Background(), hostname, options)
+}
+
+func (c *CacheManager) ResolveExternalHostContext(ctx context.Context, hostname string, options ExternalDNSOptions) ([]net.IP, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if ip := net.ParseIP(hostname); ip != nil {
+		return []net.IP{ip}, nil
 	}
 
-	ipsInterface, err, _ := c.dnsGroup.Do(hostname, func() (interface{}, error) {
-		if ips, exists := c.dnsCache.Get(hostname); exists {
+	parameters, err := makeExternalDNSParameters(hostname, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.resolveCached(ctx, parameters.cacheKey, parameters.flightKey, func(lookupCtx context.Context) ([]net.IP, error) {
+		resolver := net.DefaultResolver
+		if parameters.dnsAddr != "" {
+			resolver = &net.Resolver{
+				PreferGo: true,
+				Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+					d := net.Dialer{Timeout: 5 * time.Second}
+					if parameters.sourceIP != nil {
+						if strings.HasPrefix(network, "tcp") {
+							d.LocalAddr = &net.TCPAddr{IP: parameters.sourceIP}
+						} else {
+							d.LocalAddr = &net.UDPAddr{IP: parameters.sourceIP}
+						}
+					}
+					return d.DialContext(ctx, network, parameters.dnsAddr)
+				},
+			}
+		}
+
+		return resolver.LookupIP(lookupCtx, "ip", hostname)
+	})
+}
+
+func (c *CacheManager) resolveCached(ctx context.Context, cacheKey, flightKey string, lookup func(context.Context) ([]net.IP, error)) ([]net.IP, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if ips, exists := c.dnsCache.Get(cacheKey); exists {
+		return cloneIPs(ips), nil
+	}
+
+	resultCh := c.dnsGroup.DoChan(flightKey, func() (interface{}, error) {
+		if ips, exists := c.dnsCache.Get(cacheKey); exists {
 			return ips, nil
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		lookupCtx, cancel := context.WithTimeout(context.Background(), dnsLookupTimeout)
 		defer cancel()
-		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", hostname)
+		ips, err := lookup(lookupCtx)
 		if err != nil {
 			return nil, err
 		}
 
-		c.dnsCache.Add(hostname, ips)
-		return ips, nil
+		cached := cloneIPs(ips)
+		c.dnsCache.Add(cacheKey, cached)
+		return cached, nil
 	})
 
-	if err != nil {
-		return nil, err
-	}
-
-	return ipsInterface.([]net.IP), nil
-}
-
-func shuffledIps(ips []net.IP) []net.IP {
-	shuffled := make([]net.IP, len(ips))
-	copy(shuffled, ips)
-
-	if len(shuffled) > 1 {
-		rand.Shuffle(len(shuffled), func(i, j int) {
-			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
-		})
-	}
-
-	return shuffled
-}
-
-func (c *CacheManager) ResolveExternalHost(hostname, extDns string, getSourceIpByIps func(ips []net.IP) string) ([]net.IP, error) {
-	if ip := net.ParseIP(hostname); ip != nil {
-		return []net.IP{ip}, nil
-	}
-
-	cacheKey := fmt.Sprintf("ext:%s:%s", extDns, hostname)
-
-	if ips, exists := c.dnsCache.Get(cacheKey); exists {
-		return shuffledIps(ips), nil
-	}
-
-	isInflughtCache := true
-	ipsInterface, err, _ := c.dnsGroup.Do(cacheKey, func() (interface{}, error) {
-		isInflughtCache = false
-		if ips, exists := c.dnsCache.Get(cacheKey); exists {
-			return shuffledIps(ips), nil
+	select {
+	case result := <-resultCh:
+		if result.Err != nil {
+			return nil, result.Err
 		}
+		return cloneIPs(result.Val.([]net.IP)), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+func makeExternalDNSParameters(hostname string, options ExternalDNSOptions) (externalDNSParameters, error) {
+	parameters := externalDNSParameters{
+		cacheKey: fmt.Sprintf("ext:%s:%s", options.Server, hostname),
+	}
+	if options.Server == "" {
+		parameters.flightKey = parameters.cacheKey
+		return parameters, nil
+	}
 
-		var resolver *net.Resolver
-		if extDns != "" {
-			dnsAddr := extDns
-			dnsHost, _, err := net.SplitHostPort(extDns)
-			if err != nil {
-				dnsHost = extDns
-				dnsAddr = net.JoinHostPort(extDns, "53")
-			}
+	dnsHost := options.Server
+	parameters.dnsAddr = options.Server
+	if host, _, err := net.SplitHostPort(options.Server); err == nil {
+		dnsHost = host
+	} else {
+		parameters.dnsAddr = net.JoinHostPort(options.Server, "53")
+	}
 
-			resolver = &net.Resolver{
-				PreferGo: true,
-				Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-					dnsIp := net.ParseIP(dnsHost)
-					sourceIP := getSourceIpByIps([]net.IP{dnsIp})
-					d := net.Dialer{Timeout: time.Second * 5}
-					if sourceIP != "" {
-						d.LocalAddr = &net.UDPAddr{IP: net.ParseIP(sourceIP)}
-					}
-					return d.DialContext(ctx, "udp", dnsAddr)
-				},
-			}
+	dnsIP := net.ParseIP(dnsHost)
+	sourceIP := ""
+	if dnsIP != nil {
+		if dnsIP.To4() != nil {
+			sourceIP = options.SourceIPv4
 		} else {
-			resolver = net.DefaultResolver
+			sourceIP = options.SourceIPv6
 		}
-
-		ips, err := resolver.LookupIP(ctx, "ip", hostname)
-		if err != nil {
-			return nil, err
+	}
+	if sourceIP != "" {
+		parameters.sourceIP = net.ParseIP(sourceIP)
+		if parameters.sourceIP == nil {
+			return externalDNSParameters{}, fmt.Errorf("invalid DNS source IP %s", sourceIP)
 		}
-
-		c.dnsCache.Add(cacheKey, ips)
-		return ips, nil
-	})
-
-	if err != nil {
-		return nil, err
+		if (dnsIP.To4() != nil) != (parameters.sourceIP.To4() != nil) {
+			return externalDNSParameters{}, fmt.Errorf("DNS source IP %s has the wrong address family", sourceIP)
+		}
 	}
 
-	ips := ipsInterface.([]net.IP)
-	if isInflughtCache {
-		ips = shuffledIps(ips)
-	}
-
-	return ips, nil
+	parameters.flightKey = parameters.cacheKey + "\x00source=" + sourceIP
+	return parameters, nil
 }
 
 func (c *CacheManager) PrecompilePatterns(hostPatterns, ipPatterns []string) {

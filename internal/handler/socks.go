@@ -190,13 +190,18 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 	extIp4 := currentDecision.config.ExternalIp4
 	extIp6 := currentDecision.config.ExternalIp6
 	extDns := currentDecision.config.ExternalDns
+	dnsOptions := cache.ExternalDNSOptions{
+		Server:     extDns,
+		SourceIPv4: extIp4,
+		SourceIPv6: extIp6,
+	}
 
 	var parsedProxyURL *url.URL
 	if proxyURL == "" {
 		if currentDecision.selfGuard.isSelfConnection(targetHost) {
 			return fmt.Errorf("refusing to connect proxy to itself at %s", targetHost)
 		}
-		if extIp4 == "" && extIp6 == "" {
+		if extIp4 == "" && extIp6 == "" && extDns == "" {
 			return s.defaultHandler.UDPHandle(server, addr, d)
 		}
 	} else {
@@ -217,9 +222,7 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 				Timeout: 10 * time.Second,
 			}
 
-			ips, err := currentDecision.cache.ResolveExternalHost(target, extDns, func(ips []net.IP) string {
-				return getSourceIpByIps(ips, extIp4, extIp6)
-			})
+			ips, err := currentDecision.cache.ResolveExternalHost(target, dnsOptions)
 			if err != nil {
 				s.logger.Error("SOCKS5 UDP DNS Resolve Error for %s: %v", target, err)
 				return nil, err
@@ -228,16 +231,23 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 			if len(ips) == 0 {
 				return nil, fmt.Errorf("no IP addresses found for host: %s", target)
 			}
-			if currentDecision.selfGuard.isSelfConnection(net.JoinHostPort(ips[0].String(), port)) {
+
+			targetIP, sourceIP := getTargetAndSourceIp(ips, extIp4, extIp6)
+			if targetIP == nil {
+				return nil, fmt.Errorf("no IP addresses for %s are compatible with the configured source IPs", target)
+			}
+			if currentDecision.selfGuard.isSelfConnection(net.JoinHostPort(targetIP.String(), port)) {
 				return nil, fmt.Errorf("refusing to connect proxy to itself at %s", targetHost)
 			}
-
-			sourceIP := getSourceIpByIps(ips, extIp4, extIp6)
 			if sourceIP != "" {
-				dialer.LocalAddr = &net.UDPAddr{IP: net.ParseIP(sourceIP), Port: 0}
+				source, err := parseSourceIP(sourceIP, targetIP.To4() != nil)
+				if err != nil {
+					return nil, err
+				}
+				dialer.LocalAddr = &net.UDPAddr{IP: source}
 			}
 
-			targetIPAddr := net.JoinHostPort(ips[0].String(), port)
+			targetIPAddr := net.JoinHostPort(targetIP.String(), port)
 			upstreamConn, err := dialer.Dial("udp", targetIPAddr)
 			if err != nil {
 				s.logger.Error("SOCKS5 UDP Direct Dial Error: %v", err)
