@@ -6,11 +6,16 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"strings"
 	"time"
+
+	"goProxy/internal/cache"
 )
 
-const directFallbackDelay = 250 * time.Millisecond
+const (
+	directDialTimeout   = 10 * time.Second
+	directFallbackDelay = 250 * time.Millisecond
+	minimumAttemptTime  = 2 * time.Second
+)
 
 type dialResult struct {
 	conn    net.Conn
@@ -18,12 +23,17 @@ type dialResult struct {
 	primary bool
 }
 
-func newDirectDialer(localAddr *net.TCPAddr, resolver *net.Resolver) *net.Dialer {
+type tcpDialCandidates struct {
+	network   string
+	ips       []net.IP
+	localAddr *net.TCPAddr
+}
+
+func newDirectDialer(localAddr *net.TCPAddr) *net.Dialer {
 	return &net.Dialer{
-		Timeout:   10 * time.Second,
+		Timeout:   directDialTimeout,
 		KeepAlive: 30 * time.Second,
 		LocalAddr: localAddr,
-		Resolver:  resolver,
 	}
 }
 
@@ -45,47 +55,18 @@ func resolveTCPSource(sourceIP string, wantIPv4 bool) (*net.TCPAddr, error) {
 	return localAddr, nil
 }
 
-func externalResolver(extDns, extIp4, extIp6 string) *net.Resolver {
-	if extDns == "" {
-		return nil
+func (p *ProxyHandler) dialDirectContext(ctx context.Context, network, addr string, cacheManager *cache.CacheManager, extIp4, extIp6, extDns string) (net.Conn, error) {
+	if extIp4 == "" && extIp6 == "" && extDns == "" {
+		return newDirectDialer(nil).DialContext(ctx, network, addr)
+	}
+	if network != "tcp" && network != "tcp4" && network != "tcp6" {
+		return nil, fmt.Errorf("direct TCP dial does not support network %q", network)
 	}
 
-	dnsAddr := extDns
-	dnsHost, _, err := net.SplitHostPort(extDns)
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
-		dnsHost = extDns
-		dnsAddr = net.JoinHostPort(extDns, "53")
+		return nil, fmt.Errorf("invalid address format %s: %w", addr, err)
 	}
-
-	return &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			dialer := net.Dialer{Timeout: 5 * time.Second}
-			dnsIP := net.ParseIP(dnsHost)
-			sourceIP := getSourceIpByIps([]net.IP{dnsIP}, extIp4, extIp6)
-			if sourceIP != "" {
-				switch {
-				case strings.HasPrefix(network, "tcp"):
-					localAddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(sourceIP, "0"))
-					if err != nil {
-						return nil, fmt.Errorf("invalid TCP DNS source IP %s: %w", sourceIP, err)
-					}
-					dialer.LocalAddr = localAddr
-				case strings.HasPrefix(network, "udp"):
-					localAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(sourceIP, "0"))
-					if err != nil {
-						return nil, fmt.Errorf("invalid UDP DNS source IP %s: %w", sourceIP, err)
-					}
-					dialer.LocalAddr = localAddr
-				}
-			}
-			return dialer.DialContext(ctx, network, dnsAddr)
-		},
-	}
-}
-
-func (p *ProxyHandler) dialDirectContext(ctx context.Context, network, addr, extIp4, extIp6, extDns string) (net.Conn, error) {
-	resolver := externalResolver(extDns, extIp4, extIp6)
 
 	local4, err := resolveTCPSource(extIp4, true)
 	if err != nil {
@@ -96,32 +77,113 @@ func (p *ProxyHandler) dialDirectContext(ctx context.Context, network, addr, ext
 		return nil, err
 	}
 
-	switch {
-	case local4 == nil && local6 == nil:
-		return newDirectDialer(nil, resolver).DialContext(ctx, network, addr)
-	case local6 == nil:
-		p.logger.Debug("Direct connection to %s bound to source IP: %s", addr, extIp4)
-		return newDirectDialer(local4, resolver).DialContext(ctx, network, addr)
-	case local4 == nil:
-		p.logger.Debug("Direct connection to %s bound to source IP: %s", addr, extIp6)
-		return newDirectDialer(local6, resolver).DialContext(ctx, network, addr)
-	default:
-		return p.dialDirectDualStack(ctx, network, addr, local4, local6, resolver)
+	ips, err := cacheManager.ResolveExternalHost(host, extDns, func(ips []net.IP) string {
+		return getSourceIpByIps(ips, extIp4, extIp6)
+	})
+	if err != nil {
+		p.logger.Error("DNS Resolve Error for %s: %v", host, err)
+		return nil, err
 	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no IP addresses found for host: %s", host)
+	}
+
+	unbound := local4 == nil && local6 == nil
+	var ipv4, ipv6 []net.IP
+	preferredNetwork := ""
+	for _, ip := range ips {
+		if ip == nil {
+			continue
+		}
+		isIPv4 := ip.To4() != nil
+		if isIPv4 {
+			if network == "tcp6" || (!unbound && local4 == nil) {
+				continue
+			}
+			ipv4 = append(ipv4, ip)
+			if preferredNetwork == "" {
+				preferredNetwork = "tcp4"
+			}
+			continue
+		}
+		if network == "tcp4" || (!unbound && local6 == nil) {
+			continue
+		}
+		ipv6 = append(ipv6, ip)
+		if preferredNetwork == "" {
+			preferredNetwork = "tcp6"
+		}
+	}
+	if len(ipv4) == 0 && len(ipv6) == 0 {
+		return nil, fmt.Errorf("no IP addresses for %s are compatible with the configured source IPs", host)
+	}
+
+	if local4 != nil {
+		p.logger.Debug("IPv4 direct connections to %s bound to source IP: %s", addr, extIp4)
+	}
+	if local6 != nil {
+		p.logger.Debug("IPv6 direct connections to %s bound to source IP: %s", addr, extIp6)
+	}
+
+	dialCtx, cancel := context.WithTimeout(ctx, directDialTimeout)
+	defer cancel()
+	v4Candidates := tcpDialCandidates{network: "tcp4", ips: ipv4, localAddr: local4}
+	v6Candidates := tcpDialCandidates{network: "tcp6", ips: ipv6, localAddr: local6}
+
+	if len(ipv6) == 0 {
+		return dialTCPSerial(dialCtx, port, v4Candidates)
+	}
+	if len(ipv4) == 0 {
+		return dialTCPSerial(dialCtx, port, v6Candidates)
+	}
+	if preferredNetwork == "tcp4" {
+		return dialTCPHappyEyeballs(dialCtx, port, v4Candidates, v6Candidates)
+	}
+	return dialTCPHappyEyeballs(dialCtx, port, v6Candidates, v4Candidates)
 }
 
-func (p *ProxyHandler) dialDirectDualStack(ctx context.Context, network, addr string, local4, local6 *net.TCPAddr, resolver *net.Resolver) (net.Conn, error) {
-	if network == "tcp4" {
-		return newDirectDialer(local4, resolver).DialContext(ctx, network, addr)
+func dialTCPSerial(ctx context.Context, port string, candidates tcpDialCandidates) (net.Conn, error) {
+	var dialErrors []error
+	for i, ip := range candidates.ips {
+		attemptCtx, cancel := withAttemptDeadline(ctx, len(candidates.ips)-i)
+		targetAddr := net.JoinHostPort(ip.String(), port)
+		conn, err := newDirectDialer(candidates.localAddr).DialContext(attemptCtx, candidates.network, targetAddr)
+		cancel()
+		if err == nil {
+			return conn, nil
+		}
+		dialErrors = append(dialErrors, fmt.Errorf("%s via %s: %w", targetAddr, sourceDescription(candidates.localAddr), err))
 	}
-	if network == "tcp6" {
-		return newDirectDialer(local6, resolver).DialContext(ctx, network, addr)
-	}
-	if network != "tcp" {
-		return nil, fmt.Errorf("dual-stack direct dial does not support network %q", network)
+	return nil, errors.Join(dialErrors...)
+}
+
+func withAttemptDeadline(ctx context.Context, attemptsRemaining int) (context.Context, context.CancelFunc) {
+	deadline, ok := ctx.Deadline()
+	if !ok || attemptsRemaining <= 1 {
+		return context.WithCancel(ctx)
 	}
 
-	p.logger.Debug("Direct connection to %s racing source IPs: %s and %s", addr, local6.IP, local4.IP)
+	now := time.Now()
+	timeRemaining := deadline.Sub(now)
+	attemptTime := timeRemaining / time.Duration(attemptsRemaining)
+	if attemptTime < minimumAttemptTime && timeRemaining > minimumAttemptTime {
+		attemptTime = minimumAttemptTime
+	}
+	attemptDeadline := now.Add(attemptTime)
+	if !attemptDeadline.Before(deadline) {
+		return context.WithCancel(ctx)
+	}
+	return context.WithDeadline(ctx, attemptDeadline)
+}
+
+func sourceDescription(localAddr *net.TCPAddr) string {
+	if localAddr == nil {
+		return "the system-selected source"
+	}
+	return localAddr.IP.String()
+}
+
+func dialTCPHappyEyeballs(ctx context.Context, port string, primary, fallback tcpDialCandidates) (net.Conn, error) {
 	raceCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	done := make(chan struct{})
@@ -129,7 +191,7 @@ func (p *ProxyHandler) dialDirectDualStack(ctx context.Context, network, addr st
 	results := make(chan dialResult)
 	startFallback := make(chan struct{}, 1)
 
-	startDial := func(primary bool, delay time.Duration, dialNetwork string, localAddr *net.TCPAddr) {
+	startDial := func(isPrimary bool, delay time.Duration, candidates tcpDialCandidates) {
 		go func() {
 			if delay > 0 {
 				timer := time.NewTimer(delay)
@@ -139,16 +201,16 @@ func (p *ProxyHandler) dialDirectDualStack(ctx context.Context, network, addr st
 				case <-startFallback:
 				case <-raceCtx.Done():
 					select {
-					case results <- dialResult{err: raceCtx.Err(), primary: primary}:
+					case results <- dialResult{err: raceCtx.Err(), primary: isPrimary}:
 					case <-done:
 					}
 					return
 				}
 			}
 
-			conn, err := newDirectDialer(localAddr, resolver).DialContext(raceCtx, dialNetwork, addr)
+			conn, err := dialTCPSerial(raceCtx, port, candidates)
 			select {
-			case results <- dialResult{conn: conn, err: err, primary: primary}:
+			case results <- dialResult{conn: conn, err: err, primary: isPrimary}:
 			case <-done:
 				if conn != nil {
 					conn.Close()
@@ -157,8 +219,8 @@ func (p *ProxyHandler) dialDirectDualStack(ctx context.Context, network, addr st
 		}()
 	}
 
-	startDial(true, 0, "tcp6", local6)
-	startDial(false, directFallbackDelay, "tcp4", local4)
+	startDial(true, 0, primary)
+	startDial(false, directFallbackDelay, fallback)
 
 	var dialErrors []error
 	for range 2 {
@@ -176,7 +238,7 @@ func (p *ProxyHandler) dialDirectDualStack(ctx context.Context, network, addr st
 		dialErrors = append(dialErrors, result.err)
 	}
 
-	return nil, fmt.Errorf("direct dial to %s failed: %w", addr, errors.Join(dialErrors...))
+	return nil, errors.Join(dialErrors...)
 }
 
 func getSourceIpByIps(ips []net.IP, extIp4, extIp6 string) string {

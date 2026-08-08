@@ -14,6 +14,9 @@ paths. Preserve the following invariants:
   verification before sending CONNECT. Do not downgrade it to plaintext.
 - Direct connections using custom DNS/source addresses must pair IPv4 targets
   with the configured IPv4 source and IPv6 targets with the IPv6 source.
+- Preserve resolver order in the external DNS cache. The first compatible
+  address selects the primary family, but TCP dialing must retain and try all
+  compatible addresses rather than committing to index zero.
 - Host matching is normalized for surrounding whitespace, case, and a trailing
   root dot.
 - Decision and DNS caches are bounded expirable LRUs. Keep routing cache expiry

@@ -247,6 +247,63 @@ func TestDirectDialDelegatesResolutionAndPreservesSourceBinding(t *testing.T) {
 	}
 }
 
+func TestDialTCPSerialTriesNextAddress(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen target: %v", err)
+	}
+	defer listener.Close()
+
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split target address: %v", err)
+	}
+	candidates := tcpDialCandidates{
+		network: "tcp4",
+		ips: []net.IP{
+			net.ParseIP("127.0.0.2"),
+			net.ParseIP("127.0.0.1"),
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	conn, err := dialTCPSerial(ctx, port, candidates)
+	if err != nil {
+		t.Fatalf("dial second target address: %v", err)
+	}
+	conn.Close()
+}
+
+func TestDialTCPHappyEyeballsFallsBackBetweenFamilies(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen target: %v", err)
+	}
+	defer listener.Close()
+
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split target address: %v", err)
+	}
+	primary := tcpDialCandidates{
+		network: "tcp6",
+		ips:     []net.IP{net.ParseIP("::1")},
+	}
+	fallback := tcpDialCandidates{
+		network: "tcp4",
+		ips:     []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	conn, err := dialTCPHappyEyeballs(ctx, port, primary, fallback)
+	if err != nil {
+		t.Fatalf("dial fallback address family: %v", err)
+	}
+	conn.Close()
+}
+
 func startTestDNSServer(t *testing.T, answers []dnsmessage.AResource) string {
 	t.Helper()
 

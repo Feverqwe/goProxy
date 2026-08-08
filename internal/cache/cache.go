@@ -3,7 +3,6 @@ package cache
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -121,17 +120,12 @@ func (c *CacheManager) ResolveHost(hostname string) ([]net.IP, error) {
 	return ipsInterface.([]net.IP), nil
 }
 
-func shuffledIps(ips []net.IP) []net.IP {
-	shuffled := make([]net.IP, len(ips))
-	copy(shuffled, ips)
-
-	if len(shuffled) > 1 {
-		rand.Shuffle(len(shuffled), func(i, j int) {
-			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
-		})
+func cloneIPs(ips []net.IP) []net.IP {
+	cloned := make([]net.IP, len(ips))
+	for i, ip := range ips {
+		cloned[i] = append(net.IP(nil), ip...)
 	}
-
-	return shuffled
+	return cloned
 }
 
 func (c *CacheManager) ResolveExternalHost(hostname, extDns string, getSourceIpByIps func(ips []net.IP) string) ([]net.IP, error) {
@@ -142,14 +136,12 @@ func (c *CacheManager) ResolveExternalHost(hostname, extDns string, getSourceIpB
 	cacheKey := fmt.Sprintf("ext:%s:%s", extDns, hostname)
 
 	if ips, exists := c.dnsCache.Get(cacheKey); exists {
-		return shuffledIps(ips), nil
+		return cloneIPs(ips), nil
 	}
 
-	isInflughtCache := true
 	ipsInterface, err, _ := c.dnsGroup.Do(cacheKey, func() (interface{}, error) {
-		isInflughtCache = false
 		if ips, exists := c.dnsCache.Get(cacheKey); exists {
-			return shuffledIps(ips), nil
+			return ips, nil
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -193,12 +185,7 @@ func (c *CacheManager) ResolveExternalHost(hostname, extDns string, getSourceIpB
 		return nil, err
 	}
 
-	ips := ipsInterface.([]net.IP)
-	if isInflughtCache {
-		ips = shuffledIps(ips)
-	}
-
-	return ips, nil
+	return cloneIPs(ipsInterface.([]net.IP)), nil
 }
 
 func (c *CacheManager) PrecompilePatterns(hostPatterns, ipPatterns []string) {

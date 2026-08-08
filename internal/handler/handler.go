@@ -166,7 +166,7 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 		extIp4 := currentDecision.config.ExternalIp4
 		extIp6 := currentDecision.config.ExternalIp6
 		extDns := currentDecision.config.ExternalDns
-		return p.dialDirectContext(ctx, network, addr, extIp4, extIp6, extDns)
+		return p.dialDirectContext(ctx, network, addr, currentDecision.cache, extIp4, extIp6, extDns)
 	}
 
 	dialer := &net.Dialer{
