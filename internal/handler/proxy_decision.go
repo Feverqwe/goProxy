@@ -25,6 +25,7 @@ type ProxyDecision struct {
 	hostCache *lru.Cache[string, ProxyDecisionResult]
 	ipCache   *explru.LRU[string, ProxyDecisionResult]
 	logger    *logging.Logger
+	selfGuard *selfConnectionGuard
 }
 
 func NewProxyDecision(config *config.ProxyConfig, cacheManager *cache.CacheManager, logger *logging.Logger) *ProxyDecision {
@@ -37,6 +38,7 @@ func NewProxyDecision(config *config.ProxyConfig, cacheManager *cache.CacheManag
 		hostCache: hostCache,
 		ipCache:   ipCache,
 		logger:    logger,
+		selfGuard: newSelfConnectionGuard(config, cacheManager),
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/elazarl/goproxy"
@@ -94,6 +95,12 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 	dialer := &net.Dialer{
 		Timeout:   10 * time.Second,
 		KeepAlive: 30 * time.Second,
+		ControlContext: func(ctx context.Context, network, address string, _ syscall.RawConn) error {
+			if currentDecision.selfGuard.isSelfConnection(address) {
+				return fmt.Errorf("refusing to connect proxy to itself at %s", address)
+			}
+			return nil
+		},
 	}
 
 	if proxyURL == "" {
