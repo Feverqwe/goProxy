@@ -1,9 +1,12 @@
 package cache
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"testing"
+	"time"
 )
 
 func TestResolveExternalHostPreservesCachedOrder(t *testing.T) {
@@ -33,5 +36,26 @@ func TestResolveExternalHostPreservesCachedOrder(t *testing.T) {
 		}
 
 		got[0][0] ^= 0xff
+	}
+}
+
+func TestResolveExternalHostContextHonorsCancellation(t *testing.T) {
+	dnsServer, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen DNS server: %v", err)
+	}
+	defer dnsServer.Close()
+
+	manager := NewCacheManager()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	started := time.Now()
+	_, err = manager.ResolveExternalHostContext(ctx, "unresponsive.example", dnsServer.LocalAddr().String(), func([]net.IP) string { return "" })
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("resolve error = %v, want context deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("canceled DNS lookup returned after %s, want less than one second", elapsed)
 	}
 }

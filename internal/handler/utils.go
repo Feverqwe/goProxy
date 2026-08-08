@@ -77,7 +77,7 @@ func (p *ProxyHandler) dialDirectContext(ctx context.Context, network, addr stri
 		return nil, err
 	}
 
-	ips, err := cacheManager.ResolveExternalHost(host, extDns, func(ips []net.IP) string {
+	ips, err := cacheManager.ResolveExternalHostContext(ctx, host, extDns, func(ips []net.IP) string {
 		return getSourceIpByIps(ips, extIp4, extIp6)
 	})
 	if err != nil {

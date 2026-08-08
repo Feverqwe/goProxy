@@ -18,20 +18,31 @@ const (
 )
 
 type CacheManager struct {
-	globCache map[string]glob.Glob
-	cidrCache map[string]*net.IPNet
-	dnsCache  *lru.LRU[string, []net.IP]
-	dnsGroup  singleflight.Group
-	mu        sync.RWMutex
+	globCache      map[string]glob.Glob
+	cidrCache      map[string]*net.IPNet
+	dnsCache       *lru.LRU[string, []net.IP]
+	dnsGroup       singleflight.Group
+	externalDNSMu  sync.Mutex
+	externalDNSRun map[string]*externalDNSCall
+	mu             sync.RWMutex
+}
+
+type externalDNSCall struct {
+	done    chan struct{}
+	cancel  context.CancelFunc
+	waiters int
+	ips     []net.IP
+	err     error
 }
 
 func NewCacheManager() *CacheManager {
 	dnsCache := lru.NewLRU[string, []net.IP](1000, nil, IPResolutionTTL)
 
 	return &CacheManager{
-		globCache: make(map[string]glob.Glob),
-		cidrCache: make(map[string]*net.IPNet),
-		dnsCache:  dnsCache,
+		globCache:      make(map[string]glob.Glob),
+		cidrCache:      make(map[string]*net.IPNet),
+		dnsCache:       dnsCache,
+		externalDNSRun: make(map[string]*externalDNSCall),
 	}
 }
 
@@ -129,6 +140,13 @@ func cloneIPs(ips []net.IP) []net.IP {
 }
 
 func (c *CacheManager) ResolveExternalHost(hostname, extDns string, getSourceIpByIps func(ips []net.IP) string) ([]net.IP, error) {
+	return c.ResolveExternalHostContext(context.Background(), hostname, extDns, getSourceIpByIps)
+}
+
+func (c *CacheManager) ResolveExternalHostContext(ctx context.Context, hostname, extDns string, getSourceIpByIps func(ips []net.IP) string) ([]net.IP, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if ip := net.ParseIP(hostname); ip != nil {
 		return []net.IP{ip}, nil
 	}
@@ -139,15 +157,47 @@ func (c *CacheManager) ResolveExternalHost(hostname, extDns string, getSourceIpB
 		return cloneIPs(ips), nil
 	}
 
-	ipsInterface, err, _ := c.dnsGroup.Do(cacheKey, func() (interface{}, error) {
-		if ips, exists := c.dnsCache.Get(cacheKey); exists {
-			return ips, nil
+	call := c.getOrStartExternalDNSCall(cacheKey, hostname, extDns, getSourceIpByIps)
+	select {
+	case <-call.done:
+		if call.err != nil {
+			return nil, call.err
 		}
+		return cloneIPs(call.ips), nil
+	case <-ctx.Done():
+		c.releaseExternalDNSWaiter(cacheKey, call)
+		return nil, ctx.Err()
+	}
+}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+func (c *CacheManager) getOrStartExternalDNSCall(cacheKey, hostname, extDns string, getSourceIpByIps func(ips []net.IP) string) *externalDNSCall {
+	c.externalDNSMu.Lock()
+	if call, exists := c.externalDNSRun[cacheKey]; exists {
+		call.waiters++
+		c.externalDNSMu.Unlock()
+		return call
+	}
 
-		var resolver *net.Resolver
+	lookupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	call := &externalDNSCall{
+		done:    make(chan struct{}),
+		cancel:  cancel,
+		waiters: 1,
+	}
+	c.externalDNSRun[cacheKey] = call
+	c.externalDNSMu.Unlock()
+
+	go c.runExternalDNSCall(lookupCtx, cacheKey, hostname, extDns, getSourceIpByIps, call)
+	return call
+}
+
+func (c *CacheManager) runExternalDNSCall(ctx context.Context, cacheKey, hostname, extDns string, getSourceIpByIps func(ips []net.IP) string, call *externalDNSCall) {
+	defer call.cancel()
+
+	if ips, exists := c.dnsCache.Get(cacheKey); exists {
+		call.ips = ips
+	} else {
+		resolver := net.DefaultResolver
 		if extDns != "" {
 			dnsAddr := extDns
 			dnsHost, _, err := net.SplitHostPort(extDns)
@@ -159,33 +209,48 @@ func (c *CacheManager) ResolveExternalHost(hostname, extDns string, getSourceIpB
 			resolver = &net.Resolver{
 				PreferGo: true,
 				Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-					dnsIp := net.ParseIP(dnsHost)
-					sourceIP := getSourceIpByIps([]net.IP{dnsIp})
-					d := net.Dialer{Timeout: time.Second * 5}
+					dnsIP := net.ParseIP(dnsHost)
+					sourceIP := getSourceIpByIps([]net.IP{dnsIP})
+					d := net.Dialer{Timeout: 5 * time.Second}
 					if sourceIP != "" {
-						d.LocalAddr = &net.UDPAddr{IP: net.ParseIP(sourceIP)}
+						source := net.ParseIP(sourceIP)
+						if strings.HasPrefix(network, "tcp") {
+							d.LocalAddr = &net.TCPAddr{IP: source}
+						} else {
+							d.LocalAddr = &net.UDPAddr{IP: source}
+						}
 					}
-					return d.DialContext(ctx, "udp", dnsAddr)
+					return d.DialContext(ctx, network, dnsAddr)
 				},
 			}
-		} else {
-			resolver = net.DefaultResolver
 		}
 
-		ips, err := resolver.LookupIP(ctx, "ip", hostname)
-		if err != nil {
-			return nil, err
+		call.ips, call.err = resolver.LookupIP(ctx, "ip", hostname)
+		if call.err == nil {
+			c.dnsCache.Add(cacheKey, call.ips)
 		}
-
-		c.dnsCache.Add(cacheKey, ips)
-		return ips, nil
-	})
-
-	if err != nil {
-		return nil, err
 	}
 
-	return cloneIPs(ipsInterface.([]net.IP)), nil
+	c.externalDNSMu.Lock()
+	if c.externalDNSRun[cacheKey] == call {
+		delete(c.externalDNSRun, cacheKey)
+	}
+	c.externalDNSMu.Unlock()
+	close(call.done)
+}
+
+func (c *CacheManager) releaseExternalDNSWaiter(cacheKey string, call *externalDNSCall) {
+	c.externalDNSMu.Lock()
+	defer c.externalDNSMu.Unlock()
+
+	if c.externalDNSRun[cacheKey] != call {
+		return
+	}
+	call.waiters--
+	if call.waiters == 0 {
+		delete(c.externalDNSRun, cacheKey)
+		call.cancel()
+	}
 }
 
 func (c *CacheManager) PrecompilePatterns(hostPatterns, ipPatterns []string) {
