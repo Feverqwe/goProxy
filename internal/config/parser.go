@@ -8,6 +8,22 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func stripInlineComment(line string) string {
+	for i := 0; i < len(line); i++ {
+		isHashComment := line[i] == '#'
+		isSlashComment := line[i] == '/' && i+1 < len(line) && line[i+1] == '/'
+		if !isHashComment && !isSlashComment {
+			continue
+		}
+
+		if i == 0 || line[i-1] == ' ' || line[i-1] == '\t' {
+			return line[:i]
+		}
+	}
+
+	return line
+}
+
 func parseStringToList(input string, expandWildcardDomains bool) []string {
 	if input == "" {
 		return []string{}
@@ -17,18 +33,7 @@ func parseStringToList(input string, expandWildcardDomains bool) []string {
 	var cleanedLines []string
 
 	for _, line := range lines {
-		if idx := strings.Index(line, "//"); idx != -1 {
-			beforeComment := strings.TrimSpace(line[:idx])
-			if beforeComment == "" {
-				line = line[:idx]
-			}
-		}
-		if idx := strings.Index(line, "#"); idx != -1 {
-			beforeComment := strings.TrimSpace(line[:idx])
-			if beforeComment == "" {
-				line = line[:idx]
-			}
-		}
+		line = stripInlineComment(line)
 		cleanedLines = append(cleanedLines, strings.TrimSpace(line))
 	}
 
