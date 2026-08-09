@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"os"
@@ -29,6 +30,30 @@ func TestGeneratedDefaultConfigMatchesDefaults(t *testing.T) {
 	}
 	if !bytes.Contains(generated, []byte("# HTTP/HTTPS proxy listen address.")) {
 		t.Fatal("generated config is missing field documentation")
+	}
+	for _, section := range []string{
+		"Proxy routes",
+		"Listeners",
+		"Logging",
+		"Reporting",
+		"Automatic reload",
+		"Routing rules",
+		"Direct connections",
+	} {
+		if !bytes.Contains(generated, []byte("\n# "+section+"\n\n")) {
+			t.Errorf("generated config is missing formatted %q section", section)
+		}
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(generated))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if bytes.HasPrefix([]byte(line), []byte("# ")) && len(line) > yamlCommentWidth+2 {
+			t.Errorf("generated comment exceeds %d columns: %q", yamlCommentWidth+2, line)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("reading generated config: %v", err)
 	}
 }
 

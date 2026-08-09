@@ -14,6 +14,8 @@ import (
 
 const schemaDirective = "# yaml-language-server: $schema=./" + configSchemaFilename + "\n"
 
+const yamlCommentWidth = 78
+
 func generateDocumentedYAML(config *ProxyConfig) ([]byte, error) {
 	var document yaml.Node
 	if err := document.Encode(config); err != nil {
@@ -56,7 +58,7 @@ func annotateYAMLNode(node *yaml.Node, configType reflect.Type) {
 			if !ok {
 				continue
 			}
-			key.HeadComment = field.Tag.Get("config_description")
+			key.HeadComment = formatYAMLComment(field)
 			annotateYAMLNode(value, field.Type)
 		}
 	case reflect.Slice, reflect.Array:
@@ -64,6 +66,39 @@ func annotateYAMLNode(node *yaml.Node, configType reflect.Type) {
 			annotateYAMLNode(item, configType.Elem())
 		}
 	}
+}
+
+func formatYAMLComment(field reflect.StructField) string {
+	var lines []string
+	if section := field.Tag.Get("config_section"); section != "" {
+		lines = append(lines, section, "")
+	}
+	lines = append(lines, wrapText(field.Tag.Get("config_description"), yamlCommentWidth)...)
+	if len(lines) == 0 {
+		return ""
+	}
+
+	// A leading newline tells yaml.v3 to leave an empty line before the block.
+	return "\n" + strings.Join(lines, "\n")
+}
+
+func wrapText(text string, width int) []string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return nil
+	}
+
+	lines := make([]string, 0, (len(text)/width)+1)
+	line := words[0]
+	for _, word := range words[1:] {
+		if len(line)+1+len(word) <= width {
+			line += " " + word
+			continue
+		}
+		lines = append(lines, line)
+		line = word
+	}
+	return append(lines, line)
 }
 
 func generateConfigSchema(config *ProxyConfig) ([]byte, error) {

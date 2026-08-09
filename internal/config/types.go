@@ -34,18 +34,18 @@ type RuleConfig struct {
 }
 
 type ProxyConfig struct {
-	DefaultProxy     string            `yaml:"defaultProxy" config_required:"true" config_description:"Route used when no rule matches. The name must exist in proxies."`
+	DefaultProxy     string            `yaml:"defaultProxy" config_required:"true" config_section:"Proxy routes" config_description:"Route used when no rule matches. The name must exist in proxies."`
 	Proxies          map[string]string `yaml:"proxies" config_required:"true" config_description:"Named routes. An empty URL means a direct connection and # blocks the connection."`
-	ListenHttpAddr   string            `yaml:"listenHttpAddr" config_description:"HTTP/HTTPS proxy listen address. An empty string disables the listener."`
+	ListenHttpAddr   string            `yaml:"listenHttpAddr" config_section:"Listeners" config_description:"HTTP/HTTPS proxy listen address. An empty string disables the listener."`
 	ListenSocksAddr  string            `yaml:"listenSocksAddr" config_description:"SOCKS5 proxy listen address. An empty string disables the listener."`
-	LogLevel         string            `yaml:"logLevel" config_description:"Minimum logging level." config_enum:"debug,info,warn,error,none"`
+	LogLevel         string            `yaml:"logLevel" config_section:"Logging" config_description:"Minimum logging level." config_enum:"debug,info,warn,error,none"`
 	LogFile          string            `yaml:"logFile" config_description:"Log path, relative to the profile directory unless absolute. An empty string disables file logging."`
 	MaxLogSize       int               `yaml:"maxLogSize" config_description:"Maximum log file size in megabytes before rotation." config_minimum:"1"`
 	MaxLogFiles      int               `yaml:"maxLogFiles" config_description:"Number of rotated log files to retain." config_minimum:"1"`
-	ReportTopDomains int               `yaml:"reportTopDomains" config_description:"Number of most-used domains included in usage reports by default." config_minimum:"1"`
-	AutoReloadHours  int               `yaml:"autoReloadHours" config_description:"Remote rule reload interval in hours. Zero disables periodic reloads." config_minimum:"0"`
-	Rules            []RuleConfig      `yaml:"rules" config_description:"Routing rules evaluated from top to bottom. Each rule needs proxy and at least one of hosts, ips, or externalRule." config_item_any_of:"ips,hosts,externalRule"`
-	ExternalIp4      string            `yaml:"externalIp4" config_description:"Optional IPv4 source address for direct connections."`
+	ReportTopDomains int               `yaml:"reportTopDomains" config_section:"Reporting" config_description:"Number of most-used domains included in usage reports by default." config_minimum:"1"`
+	AutoReloadHours  int               `yaml:"autoReloadHours" config_section:"Automatic reload" config_description:"Remote rule reload interval in hours. Zero disables periodic reloads." config_minimum:"0"`
+	Rules            []RuleConfig      `yaml:"rules" config_section:"Routing rules" config_description:"Rules are evaluated from top to bottom. Each rule needs proxy and at least one of hosts, ips, or externalRule." config_item_any_of:"ips,hosts,externalRule"`
+	ExternalIp4      string            `yaml:"externalIp4" config_section:"Direct connections" config_description:"Optional IPv4 source address for direct connections."`
 	ExternalIp6      string            `yaml:"externalIp6" config_description:"Optional IPv6 source address for direct connections."`
 	ExternalIf       string            `yaml:"externalIf" config_description:"Network interface from which source IP addresses are detected automatically."`
 	ExternalDns      string            `yaml:"externalDns" config_description:"Optional DNS server for direct connections. Port 53 is used when omitted." config_examples:"8.8.8.8|1.1.1.1:53|[2606:4700:4700::1111]:53"`
