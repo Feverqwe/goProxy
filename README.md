@@ -1,362 +1,304 @@
-# 🚀 GoProxy - Advanced HTTP/HTTPS/SOCKS5 Proxy Server
+# goProxy
 
-**Intelligent proxy server with rule-based routing, caching, and system tray integration**
+goProxy is a cross-platform HTTP/HTTPS and SOCKS5 proxy with ordered,
+rule-based routing. Destinations can be reached directly, blocked, or forwarded
+through an HTTP, HTTPS, SOCKS5, or SOCKS5h upstream proxy.
 
----
+It runs as a tray application on Windows and macOS and as a headless process on
+Linux.
 
-## 📋 Overview
+## Features
 
-GoProxy is a powerful proxy server written in Go that provides intelligent routing, caching, and system tray integration. It supports HTTP, HTTPS, and SOCKS5 protocols with rule-based routing and hot-reloadable configuration.
+- HTTP proxying, HTTPS via CONNECT, and SOCKS5 TCP/UDP listeners
+- A shared routing configuration for HTTP and SOCKS5 clients
+- Host glob, IP, CIDR, and DNS-based rules with negation
+- Local and remote rule lists, cached remote downloads, and YAML rule files
+- Configuration reload without restarting the process
+- Optional source-interface binding and a custom DNS resolver
+- DNS, CIDR, glob, and routing caches
+- Rotating file logs with configurable levels
+- Protection against using goProxy's own listeners as upstream targets
 
-## ✨ Features
+## Install
 
-### 🌐 Protocols & Servers
-- **Multi-Protocol Support**: HTTP, HTTPS, and SOCKS5 proxy protocols
-- **Dual Server Mode**: Simultaneous HTTP/HTTPS and SOCKS5 server support
-- **UDP Support**: SOCKS5 UDP association for gaming and VoIP
+Download a prebuilt package from
+[GitHub Releases](https://github.com/Feverqwe/goProxy/releases), or build the
+project from source with Go 1.25 or newer:
 
-### 🎯 Routing & Rules
-- **Rule-Based Routing**: Advanced pattern matching for IPs and hosts with wildcard support
-- **External Rule Sources**: Load rules from URLs and local files with automatic caching
-- **Negation Support**: Exclude specific patterns using `!` prefix
-- **Blocking Support**: Block specific domains/URLs
+```sh
+git clone https://github.com/Feverqwe/goProxy.git
+cd goProxy
+go build -o goProxy .
+```
 
-### ⚡ Performance
-- **Caching**: DNS, pattern, and CIDR caching for maximum performance
-- **Connection Pooling**: Efficient connection reuse and management
-- **Hot Reload**: Configuration reload without restart
+Platform packaging scripts are also available:
 
-### 🖥️ Interface & Logging
-- **System Tray Integration**: Native system tray support (Windows/macOS)
-- **Logging**: Configurable logging with file rotation
-- **Cross-Platform**: Windows, macOS, and Linux support
+```sh
+./scripts/build.sh       # executable for the current Unix-like platform
+./scripts/build.mac.sh   # goProxy.app for macOS
+```
 
-### 🔧 Advanced Features
-- **External Interface Binding**: Bind connections to specific network interfaces or IP addresses
-- **Custom DNS Resolution**: Configurable DNS servers with source IP binding
-- **Auto-Update**: Periodic configuration reload
+On Windows, run `scripts\build.win.bat` from a Developer Command Prompt or a
+regular command prompt with Go available on `PATH`.
 
-## 📦 Installation
+## Quick start
 
-### Pre-built Binaries
+Run the binary with its default profile:
 
-Download the latest release from the [Releases page](https://github.com/Feverqwe/goProxy/releases):
+```sh
+./goProxy
+```
 
-| Platform | File | Description |
-|----------|------|-------------|
-| 🪟 **Windows** | `goProxy.exe` | Console application with system tray |
-| 🍎 **macOS** | `GoProxy.app` | Native macOS application bundle |
-| 🐧 **Linux** | `goProxy` | Command-line binary |
+On the first run, goProxy creates a documented `config.yaml` and a
+`goproxy.schema.json` file for editor completion and validation. The default
+configuration starts:
 
-### Building from Source
+- an HTTP/HTTPS proxy on `:8080`;
+- a SOCKS5 TCP/UDP proxy on `:1080`;
+- direct routing for every destination.
 
-#### Prerequisites
-- Go 1.25.0 or later
-- Git
+Point an HTTP client at `http://127.0.0.1:8080` or a SOCKS5 client at
+`socks5://127.0.0.1:1080`.
 
-#### Build Steps
+> [!WARNING]
+> The default addresses listen on all network interfaces, and the incoming
+> proxies do not require authentication. Use loopback addresses such as
+> `127.0.0.1:8080` and `127.0.0.1:1080` unless you intentionally want to expose
+> the service to other hosts and have protected it at the network level.
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/Feverqwe/goProxy.git
-   cd goProxy
-   ```
+## Configuration
 
-2. **Build for your platform**
+The default profile directory depends on the platform:
 
-   **Linux/Unix:**
-   ```bash
-   chmod +x ./scripts/*.sh
-   bash ./scripts/build.sh
-   ```
+| Platform | Directory |
+| --- | --- |
+| Windows | Current working directory |
+| macOS | `~/Library/Application Support/com.rndnm.goproxy` |
+| Linux | Directory containing the executable |
 
-   **macOS:**
-   ```bash
-   chmod +x ./scripts/*.sh
-   sh ./scripts/build.mac.sh
-   ```
+Set `PROFILE_PLACE` to use a different profile directory, or pass an explicit
+configuration file:
 
-   **Windows:**
-   ```cmd
-   cd scripts
-   build.win.bat
-   ```
+```sh
+./goProxy -config /path/to/config.yaml
+```
 
-## ⚙️ Configuration
+Relative local rule files are resolved from the directory containing the
+configuration file. Relative log files and downloaded-rule caches are stored
+in the profile directory.
 
-### Configuration File Location
-
-GoProxy automatically creates a configuration file on first run:
-
-| Platform | Path |
-|----------|------|
-| 🪟 Windows | Current working directory |
-| 🍎 macOS | `~/Library/Application Support/com.rndnm.goproxy/config.yaml` |
-| 🐧 Linux | Same directory as the executable |
-
-On first run GoProxy also creates `goproxy.schema.json` next to the configuration
-file. The generated YAML references this schema, so editors with YAML Language
-Server support provide field descriptions, autocompletion, and validation. The
-configuration itself contains comments for optional settings, while the schema
-also provides constraints and examples.
-
-### Example Configuration
+### Example
 
 ```yaml
-# Basic settings
-defaultProxy: "direct"
+# yaml-language-server: $schema=./goproxy.schema.json
 
-# Proxy definitions
+defaultProxy: direct
+
 proxies:
-  socks5: "socks5://localhost:1080"
-  http: "http://localhost:8081"
   direct: ""
   block: "#"
+  office: "socks5h://user:password@proxy.example.com:1080"
 
-# Server settings
-listenHttpAddr: ":8080"
-listenSocksAddr: ":1080"
+# Use an empty string to disable either listener.
+listenHttpAddr: "127.0.0.1:8080"
+listenSocksAddr: "127.0.0.1:1080"
 
-# Logging
-logLevel: "info"
-logFile: "goProxy.log"
+logLevel: info
+logFile: goProxy.log
 maxLogSize: 10
 maxLogFiles: 5
 
-# Auto-reload
+# Refresh remote rules periodically; 0 disables periodic reloads.
 autoReloadHours: 24
 
-# Routing rules
 rules:
-  # Rule 1: Direct connection for local networks
-  - name: "Local Networks"
-    proxy: "direct"
-    ips: "192.168.1.0/24 10.0.0.0/8 172.16.0.0/12"
-    hosts: "localhost *.local *.example.com"
+  - name: local destinations
+    proxy: direct
+    hosts: |
+      localhost
+      *.local
+    ips: |
+      10.0.0.0/8
+      172.16.0.0/12
+      192.168.0.0/16
 
-  # Rule 2: Block domains using external DNS blocklists
-  - name: "dns-blocklist-pro"
-    proxy: "block"
-    hosts: "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro.txt"
+  - name: blocked hosts
+    proxy: block
+    hosts: |
+      ads.example
+      *.tracking.example
+      ./lists/blocked-hosts.txt
 
-  # Rule 3: Use HTTP proxy for external domains
-  - name: "External Domains"
-    proxy: "http"
-    hosts: "*.external.com api.*.com"
+  - name: office proxy
+    proxy: office
+    hosts: |
+      *.example.com
+      !status.example.com
 
-  # Rule 4: Load rules from external file
-  - name: "External Rule Configuration"
-    proxy: "socks5"
-    externalRule: "./external-rules.yaml"
-
-# External interface and DNS configuration
-externalIf: "eth0"      # Auto-detect IPs from this interface
-externalIp4: ""         # Force IPv4 source address
-externalIp6: ""         # Force IPv6 source address
-externalDns: "8.8.8.8"  # Custom DNS server
+# Optional settings for direct connections.
+externalIf: ""
+externalIp4: ""
+externalIp6: ""
+externalDns: ""
 ```
 
-### 📝 Configuration Parameters
+### Routes
 
-#### Global Settings
+`proxies` maps route names to their behavior:
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `defaultProxy` | string | Default proxy when no rules match |
-| `proxies` | map | Map of proxy definitions |
-| `listenHttpAddr` | string | HTTP/HTTPS server address and port (e.g., ":8080") |
-| `listenSocksAddr` | string | SOCKS5 server address and port (e.g., ":1080") |
-| `logLevel` | string | Logging level: `debug`, `info`, `warn`, `error`, `none` |
-| `logFile` | string | Log file path (relative to config directory) |
-| `maxLogSize` | int | Maximum log file size in MB before rotation |
-| `maxLogFiles` | int | Number of backup log files to keep |
-| `autoReloadHours` | int | Automatic reload interval in hours (0 = disabled) |
-| `externalIf` | string | Network interface name for auto-detecting source IPs |
-| `externalIp4` | string | Force IPv4 source address for direct connections |
-| `externalIp6` | string | Force IPv6 source address for direct connections |
-| `externalDns` | string | Custom DNS server (IP:port format) |
+| Value | Behavior |
+| --- | --- |
+| `""` | Connect directly |
+| `"#"` | Block the connection |
+| `http://...` or `https://...` | Connect through an HTTP CONNECT proxy |
+| `socks5://...` or `socks5h://...` | Connect through a SOCKS5 proxy |
 
-#### Proxy Definitions
+Upstream URLs may include credentials, for example
+`http://user:password@proxy.example.com:3128`. HTTP and HTTPS upstreams use
+Basic proxy authentication; SOCKS5 upstreams use username/password
+authentication when credentials are present.
 
-- `direct`: No proxy (direct connection)
-- `block`: Block the connection entirely
-- Custom proxies: HTTP/HTTPS/SOCKS5 URLs
+`defaultProxy` and every rule's `proxy` value must name an entry in `proxies`.
 
-**Examples:**
-```yaml
-proxies:
-  direct: ""
-  block: "#"
-  my_socks: "socks5://user:pass@proxy.example.com:1080"
-  my_http: "http://proxy.example.com:8080"
-```
+### Rules
 
-#### Rule Configuration
+Rules are evaluated from top to bottom. The first matching rule selects its
+route; if no rule matches, `defaultProxy` is used.
 
-Rules are evaluated in order. Each rule can match based on:
-
-| Field | Description |
-|-------|-------------|
-| `name` | Optional descriptive name for the rule (used in logging) |
-| `proxy` | Which proxy to use for this rule |
-| `ips` | CIDR notation, IP addresses, or URLs to external IP lists |
-| `hosts` | Hostname patterns with wildcards, or URLs to external host lists |
-| `externalRule` | External YAML file containing rule configuration |
-
-### 🎯 Supported Rule Types
-
-#### IP Rules (`ips` field)
+A rule matches when at least one positive entry in `hosts` or `ips` matches.
+Any matching entry prefixed with `!` excludes the entire rule, so evaluation
+continues with the next rule. For example, this sends every host under
+`example.com` except `status.example.com` through `office`:
 
 ```yaml
-ips: |
-  192.168.1.1              # Individual IP
-  192.168.1.0/24           # CIDR notation
-  example.com              # Domain name (resolved to IPs)
-  https://example.com/ips.txt  # External URL
-  ./ips.txt                # Local file
-  !192.168.1.100           # Negation (exclude)
+- name: office sites
+  proxy: office
+  hosts: |
+    *.example.com
+    !status.example.com
 ```
 
-#### Host Rules (`hosts` field)
+Host entries support exact names and glob patterns. `*.example.com` also
+matches the base domain `example.com`. IP entries accept individual addresses,
+CIDRs, and hostnames that are resolved before comparison.
+
+Entries may be separated by whitespace, commas, or newlines. Lines whose first
+non-space characters are `#` or `//` are comments.
+
+### External rules
+
+The `hosts` and `ips` fields can include local list files or HTTP(S) URLs:
 
 ```yaml
 hosts: |
-  example.com              # Exact domain
-  *.example.com            # Wildcard (includes base domain)
-  https://example.com/hosts.txt  # External URL
-  ./hosts.txt              # Local file
-  !blocked-domain.com      # Negation (exclude)
+  ./lists/hosts.txt
+  https://example.com/rules/hosts.txt
+ips: |
+  ./lists/networks.txt
 ```
 
-**Note:** `*.example.com` automatically includes `example.com`
+Use `./` for a relative list path or an absolute path. A leading `!` applies
+negation to every entry loaded from that source.
 
-#### External Rule Files (`externalRule` field)
+For a structured rule, use `externalRule` with a local YAML file or URL:
 
 ```yaml
 rules:
-  - name: "My External Rules"
-    proxy: "socks5"
-    externalRule: "./external-rules.yaml"
+  - name: company networks
+    proxy: office
+    externalRule: ./rules/company.yaml
 ```
 
-**Example external-rules.yaml:**
+The external file may contain `name`, `hosts`, and `ips`:
+
 ```yaml
-name: "External Rule Set"
-ips: "192.168.100.0/24 10.100.0.0/16"
-hosts: "*.external.com api.external.com"
+name: shared company rules
+hosts: |
+  *.corp.example
+ips: |
+  10.20.0.0/16
 ```
 
-## 🚀 Usage
+Inline and external `hosts`/`ips` entries are combined. An inline `name` takes
+precedence over the external name.
 
-### Command Line
+Remote files are cached under the profile directory. If an update fails,
+goProxy continues with the cached copy when one is available.
 
-```bash
-# Basic usage (uses default config location)
-./goProxy
+### Settings reference
 
-# Specify custom config file
-./goProxy -config /path/to/config.yaml
+| Setting | Description |
+| --- | --- |
+| `defaultProxy` | Route used when no rule matches |
+| `proxies` | Named direct, blocked, or upstream routes |
+| `listenHttpAddr` | HTTP/HTTPS listen address; empty disables it |
+| `listenSocksAddr` | SOCKS5 TCP/UDP listen address; empty disables it |
+| `logLevel` | `debug`, `info`, `warn`, `error`, or `none` |
+| `logFile` | Rotating log path; empty disables file logging |
+| `maxLogSize` | Maximum log size in MB before rotation |
+| `maxLogFiles` | Number of rotated files to retain |
+| `autoReloadHours` | Remote-rule reload interval; `0` disables it |
+| `rules` | Ordered routing rules |
+| `externalIf` | Interface used to detect direct-connection source IPs |
+| `externalIp4` | Explicit IPv4 source address for direct connections |
+| `externalIp6` | Explicit IPv6 source address for direct connections |
+| `externalDns` | DNS server for direct connections; port 53 is the default |
 
-# Show version information
-./goProxy -version
+The generated `goproxy.schema.json` is the authoritative field reference and
+contains types, defaults, constraints, and editor descriptions.
+
+## Reload and lifecycle
+
+On Windows and macOS, the tray menu provides:
+
+- **Reload config** — apply configuration changes;
+- **Reload rules** — apply the configuration and force remote rule downloads;
+- **Open config directory**;
+- **Check updates**;
+- **Quit**.
+
+On Unix-like systems, send `SIGHUP` to reload the configuration:
+
+```sh
+kill -HUP <pid>
 ```
 
-### 🖥️ System Tray (Windows/macOS)
+Set `autoReloadHours` to periodically refresh remote rules. `SIGINT` and
+`SIGTERM` shut the process down gracefully.
 
-When running on Windows or macOS, GoProxy provides a system tray icon with options:
+Listener addresses are reloadable. If an address changes, goProxy opens the
+replacement listener before closing the old one.
 
-- **Reload config** — Reload configuration without restarting
-- **Open config directory** — Open the directory containing the config file
-- **Quit** — Gracefully shut down the proxy
+## Protocol notes
 
-> **Note:** System tray is not available on Linux. Use command-line signals instead.
+- HTTP clients can send plain HTTP requests and HTTPS tunnels through CONNECT.
+- SOCKS5 supports TCP CONNECT and UDP ASSOCIATE.
+- SOCKS5 UDP can use a direct route or a SOCKS5/SOCKS5h upstream. A route that
+  points to an HTTP/HTTPS upstream falls back to a direct UDP connection.
+- `externalIf`, `externalIp4`, `externalIp6`, and `externalDns` affect direct
+  connections, including direct SOCKS5 UDP traffic.
 
-### 🔄 Hot Reload
+## Command line
 
-Configuration can be reloaded without restarting the server:
+```text
+goProxy [-config path] [-version]
+```
 
-| Platform | Method |
-|----------|--------|
-| Windows/macOS | Use "Reload config" option in system tray |
-| All platforms | Send SIGHUP signal: `kill -HUP <pid>` |
-| Automatic | Configure `autoReloadHours` in config (0 = disabled) |
+| Option | Description |
+| --- | --- |
+| `-config path` | Use the specified YAML configuration file |
+| `-version` | Print the version and exit |
 
-## 📚 Documentation
+## Development
 
-### Rule Matching Logic
+Run the standard checks from the repository root:
 
-GoProxy uses sophisticated pattern matching with intelligent caching:
+```sh
+go test ./...
+go vet ./...
+go build ./...
+```
 
-#### 🌐 Host Matching
-- Supports wildcards: `*.example.com` matches both `sub.example.com` and `example.com`
-- Automatically handles ports: `example.com:8080` is properly parsed
-- Cached pattern matching for performance
+## License
 
-#### 🔢 IP Matching
-- CIDR notation: `192.168.1.0/24`
-- Individual IPs: `192.168.1.1`
-- Domain resolution: Hostnames are resolved to IPs with DNS caching
-
-#### ⚙️ Rule Evaluation Order
-
-1. Rules are processed in order from top to bottom
-2. For each rule:
-   - External rule files (`externalRule`) are loaded first
-   - Fields from external rule are merged with main rule
-   - External rule lists (URLs in `ips` and `hosts` fields) are loaded and parsed
-3. Matching is attempted in this order: Host → IP
-4. First matching rule determines the proxy to use
-5. If no rules match, the `defaultProxy` is used
-6. Negated patterns (`!pattern`) exclude matches from the rule
-
-### 🔗 External Rule Merging
-
-When using `externalRule`, fields are merged as follows:
-
-- **Ips, Hosts**: Concatenated with newlines, then parsed together
-- **Name**: Uses main rule name if specified, otherwise external rule name
-
-This allows you to create modular rule configurations and combine multiple rule sources.
-
-### 💾 External Rule Caching
-
-- External rules from URLs are automatically cached locally
-- Cache files are stored in platform-specific cache directories
-- Failed downloads fall back to cached versions when available
-- Cache files are named using SHA-256 hashes of the URL for uniqueness
-
-### 🔍 Rule Parsing Logic
-
-- Supports comments in rule lists using `//` or `#`
-- Multiple entries can be separated by commas or spaces
-- Wildcard domains (`*.example.com`) are automatically expanded to include the base domain
-- External rule sources are loaded and merged with local rules
-
-### 🌍 Source IP Binding
-
-- Configure `externalIf` to auto-detect IPs from a network interface
-- Use `externalIp4` and `externalIp6` to force specific source IPs
-- Custom DNS resolution with source IP binding for direct connections
-
-## 📦 Dependencies
-
-| Library | Purpose |
-|---------|---------|
-| [`github.com/elazarl/goproxy`](https://github.com/elazarl/goproxy) | Core HTTP/HTTPS proxy functionality |
-| [`github.com/getlantern/systray`](https://github.com/getlantern/systray) | System tray integration |
-| [`github.com/gobwas/glob`](https://github.com/gobwas/glob) | Pattern matching |
-| [`github.com/hashicorp/golang-lru/v2`](https://github.com/hashicorp/golang-lru/v2) | LRU caching |
-| [`github.com/txthinking/socks5`](https://github.com/txthinking/socks5) | SOCKS5 server implementation |
-| [`gopkg.in/yaml.v3`](https://github.com/go-yaml/yaml) | YAML configuration parsing |
-| [`gopkg.in/natefinch/lumberjack.v2`](https://github.com/natefinch/lumberjack) | Log file rotation |
-| [`github.com/skratchdot/open-golang`](https://github.com/skratchdot/open-golang) | Opening config directory |
-| [`golang.org/x/net`](https://pkg.go.dev/golang.org/x/net) | Extended networking capabilities |
-| [`golang.org/x/sync`](https://pkg.go.dev/golang.org/x/sync) | Synchronization primitives |
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📄 License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+goProxy is available under the [MIT License](LICENSE).
