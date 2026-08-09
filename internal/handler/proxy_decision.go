@@ -95,6 +95,16 @@ OuterLoop:
 		matchType := ""
 		parsedHosts := rule.GetParsedHosts()
 		parsedIps := rule.GetParsedIps()
+		indexedPositive, indexedNegative := rule.MatchIndexedHost(host)
+		if indexedNegative {
+			d.logger.Debug("Rule '%s' negated by indexed host rule for host '%s'. Skipping rule.", rule.Name, host)
+			continue OuterLoop
+		}
+		if indexedPositive {
+			matchFound = true
+			matchType = "host"
+			d.logger.Debug("Rule '%s' match: target '%s' matched indexed host rule", rule.Name, host)
+		}
 
 		for _, pattern := range parsedHosts {
 			isNegation := strings.HasPrefix(pattern, "!")

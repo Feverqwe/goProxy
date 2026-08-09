@@ -52,6 +52,12 @@ func (r *RuleConfig) GetParsedHosts() []string {
 	return r.parsedHosts
 }
 
+// MatchIndexedHost checks exact hostnames and simple *.domain suffix rules.
+// Complex glob patterns remain available through GetParsedHosts.
+func (r *RuleConfig) MatchIndexedHost(host string) (positive, negative bool) {
+	return r.hostIndex.match(host)
+}
+
 func (c *ProxyConfig) GetAccessLogPath() string {
 	if c.LogFile == "" {
 		return ""
@@ -80,29 +86,9 @@ func (c *ProxyConfig) GetMaxLogFiles() int {
 }
 
 func loadExternalRules(source string, baseDir string, cacheOnly bool, httpClientFunc HTTPClientFunc, logger *logging.Logger, forceReload bool, ttl int) (string, error) {
-	var filePath string
-	var err error
-
-	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
-		filePath, err = downloadAndCacheFile(source, cacheOnly, httpClientFunc, logger, forceReload, ttl)
-		if err != nil {
-			return "", err
-		}
-	} else {
-		filePath = source
-
-		if !filepath.IsAbs(filePath) {
-			if baseDir != "" {
-				filePath = filepath.Join(baseDir, filePath)
-			} else {
-				profileDir := getProfilePath()
-				filePath = filepath.Join(profileDir, filePath)
-			}
-		}
-
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
-			return "", fmt.Errorf("local file not found: %s", filePath)
-		}
+	filePath, err := resolveExternalRulesPath(source, baseDir, cacheOnly, httpClientFunc, logger, forceReload, ttl)
+	if err != nil {
+		return "", err
 	}
 
 	content, err := os.ReadFile(filePath)
@@ -111,6 +97,28 @@ func loadExternalRules(source string, baseDir string, cacheOnly bool, httpClient
 	}
 
 	return string(content), nil
+}
+
+func resolveExternalRulesPath(source string, baseDir string, cacheOnly bool, httpClientFunc HTTPClientFunc, logger *logging.Logger, forceReload bool, ttl int) (string, error) {
+	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+		return downloadAndCacheFile(source, cacheOnly, httpClientFunc, logger, forceReload, ttl)
+	}
+
+	filePath := source
+	if !filepath.IsAbs(filePath) {
+		if baseDir != "" {
+			filePath = filepath.Join(baseDir, filePath)
+		} else {
+			filePath = filepath.Join(getProfilePath(), filePath)
+		}
+	}
+	if _, err := os.Stat(filePath); err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("local file not found: %s", filePath)
+		}
+		return "", fmt.Errorf("failed to access local file %s: %v", filePath, err)
+	}
+	return filePath, nil
 }
 
 func OpenConfigDirectory(configPath string, logger *logging.Logger) {

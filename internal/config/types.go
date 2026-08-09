@@ -25,6 +25,7 @@ type RuleBaseConfig struct {
 
 	parsedIps   []string
 	parsedHosts []string
+	hostIndex   ruleHostIndex
 }
 
 type RuleConfig struct {

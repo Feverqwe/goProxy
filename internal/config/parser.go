@@ -1,9 +1,12 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
+	"io"
+	"os"
 	"strings"
-	"sync"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,10 +16,15 @@ func parseStringToList(input string, expandWildcardDomains bool) []string {
 		return []string{}
 	}
 
-	lines := strings.Split(input, "\n")
-	var cleanedLines []string
-
-	for _, line := range lines {
+	result := make([]string, 0, strings.Count(input, "\n")+1)
+	for len(input) > 0 {
+		line := input
+		if newline := strings.IndexByte(input, '\n'); newline >= 0 {
+			line = input[:newline]
+			input = input[newline+1:]
+		} else {
+			input = ""
+		}
 		if idx := strings.Index(line, "//"); idx != -1 {
 			beforeComment := strings.TrimSpace(line[:idx])
 			if beforeComment == "" {
@@ -29,16 +37,8 @@ func parseStringToList(input string, expandWildcardDomains bool) []string {
 				line = line[:idx]
 			}
 		}
-		cleanedLines = append(cleanedLines, strings.TrimSpace(line))
-	}
-
-	cleanedInput := strings.Join(cleanedLines, " ")
-	normalized := strings.ReplaceAll(cleanedInput, ",", " ")
-	parts := strings.Fields(normalized)
-
-	var result []string
-	for _, part := range parts {
-		if part != "" {
+		parts := strings.FieldsFunc(line, func(r rune) bool { return r == ',' || unicode.IsSpace(r) })
+		for _, part := range parts {
 			result = append(result, part)
 			isNegation := strings.HasPrefix(part, "!")
 			cleanToken := strings.TrimPrefix(part, "!")
@@ -56,11 +56,7 @@ func parseStringToList(input string, expandWildcardDomains bool) []string {
 }
 
 func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc, forceReload bool, ttl int) {
-	var wg sync.WaitGroup
-
 	handleRule := func(ruleIndex int) {
-		defer wg.Done()
-
 		rule := &c.Rules[ruleIndex]
 
 		var externalRule *RuleBaseConfig
@@ -99,12 +95,30 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 			return expanded
 		}
 
-		rule.parsedHosts = expandTokens(rule.Hosts, true)
+		var hosts hostRuleBuilder
+		expandHostTokens := func(input string) {
+			for _, token := range parseStringToList(input, false) {
+				isNegation := strings.HasPrefix(token, "!")
+				cleanToken := strings.TrimPrefix(token, "!")
+				if isExternalRuleSource(cleanToken) {
+					err := c.loadExternalHostRules(cleanToken, configDir, cacheOnly, httpClientFunc, forceReload, ttl, &hosts, isNegation)
+					if err != nil {
+						c.logger.Warn("Failed to load external rules from %s: %v", cleanToken, err)
+					}
+					continue
+				}
+				hosts.addString(token, false)
+			}
+		}
+
+		expandHostTokens(rule.Hosts)
 		rule.parsedIps = expandTokens(rule.Ips, false)
 		if externalRule != nil {
-			rule.parsedHosts = append(rule.parsedHosts, expandTokens(externalRule.Hosts, true)...)
+			expandHostTokens(externalRule.Hosts)
 			rule.parsedIps = append(rule.parsedIps, expandTokens(externalRule.Ips, false)...)
 		}
+		rule.parsedHosts = hosts.patterns
+		rule.hostIndex = hosts.index
 
 		if rule.Name == "" {
 			if externalRule != nil && externalRule.Name != "" {
@@ -116,11 +130,12 @@ func (c *ProxyConfig) preParseRuleLists(configDir string, cacheOnly bool, httpCl
 	}
 
 	for i := range c.Rules {
-		wg.Add(1)
-		go handleRule(i)
+		handleRule(i)
 	}
+}
 
-	wg.Wait()
+func isExternalRuleSource(token string) bool {
+	return strings.HasPrefix(token, "http://") || strings.HasPrefix(token, "https://") || strings.HasPrefix(token, "/") || strings.HasPrefix(token, "./")
 }
 
 func (c *ProxyConfig) loadExternalRuleFile(source string, configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc, forceReload bool, ttl int) (*RuleBaseConfig, error) {
@@ -153,4 +168,115 @@ func (c *ProxyConfig) loadExternalRuleList(url string, expandWildcardDomains boo
 	}
 
 	return parseStringToList(rulesContent, expandWildcardDomains)
+}
+
+func (c *ProxyConfig) loadExternalHostRules(source string, configDir string, cacheOnly bool, httpClientFunc HTTPClientFunc, forceReload bool, ttl int, hosts *hostRuleBuilder, forceNegation bool) error {
+	filePath, err := resolveExternalRulesPath(source, configDir, cacheOnly, httpClientFunc, c.logger, forceReload, ttl)
+	if err != nil {
+		return err
+	}
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file %s: %v", filePath, err)
+	}
+	defer file.Close()
+
+	var capacity hostRuleCapacity
+	if err := scanRuleTokens(file, func(token []byte) {
+		capacity.observe(token, forceNegation)
+	}); err != nil {
+		return fmt.Errorf("failed to read file %s: %v", filePath, err)
+	}
+	hosts.reserve(capacity)
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("failed to rewind file %s: %v", filePath, err)
+	}
+	if err := scanRuleTokens(file, func(token []byte) {
+		hosts.add(token, forceNegation)
+	}); err != nil {
+		return fmt.Errorf("failed to read file %s: %v", filePath, err)
+	}
+	return nil
+}
+
+// scanRuleTokens tokenizes a list without loading the whole file. A line whose
+// first non-space characters are # or // is treated as a comment, matching the
+// existing list syntax.
+func scanRuleTokens(reader io.Reader, visit func([]byte)) error {
+	buffered := bufio.NewReaderSize(reader, 64*1024)
+	chunk := make([]byte, 64*1024)
+	token := make([]byte, 0, 256)
+	atLineStart := true
+	commentLine := false
+	pendingSlash := false
+
+	emit := func() {
+		if len(token) != 0 {
+			visit(token)
+			token = token[:0]
+		}
+	}
+
+	for {
+		n, err := buffered.Read(chunk)
+		for _, b := range chunk[:n] {
+			if commentLine {
+				if b == '\n' {
+					commentLine = false
+					atLineStart = true
+				}
+				continue
+			}
+
+			if pendingSlash {
+				pendingSlash = false
+				if b == '/' {
+					commentLine = true
+					continue
+				}
+				token = append(token, '/')
+				atLineStart = false
+			}
+
+			if b == '\n' {
+				emit()
+				atLineStart = true
+				continue
+			}
+			if atLineStart {
+				switch b {
+				case ' ', '\t', '\r', '\v', '\f':
+					continue
+				case '#':
+					commentLine = true
+					continue
+				case '/':
+					pendingSlash = true
+					continue
+				default:
+					atLineStart = false
+				}
+			}
+
+			switch b {
+			case ' ', '\t', '\r', '\v', '\f', ',':
+				emit()
+			default:
+				token = append(token, b)
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+	}
+
+	if pendingSlash {
+		token = append(token, '/')
+	}
+	emit()
+	return nil
 }
