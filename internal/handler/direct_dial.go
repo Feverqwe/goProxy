@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"syscall"
 	"time"
 
 	"goProxy/internal/cache"
@@ -22,7 +21,6 @@ type directDialer struct {
 	cacheManager *cache.CacheManager
 	dnsOptions   cache.ExternalDNSOptions
 	logger       *logging.Logger
-	selfGuard    *selfConnectionGuard
 	timeout      time.Duration
 }
 
@@ -36,7 +34,6 @@ type tcpDialCandidates struct {
 	network   string
 	ips       []net.IP
 	localAddr *net.TCPAddr
-	selfGuard *selfConnectionGuard
 }
 
 func newDirectRouteDialer(decision *ProxyDecision, logger *logging.Logger) *directDialer {
@@ -47,27 +44,17 @@ func newDirectRouteDialer(decision *ProxyDecision, logger *logging.Logger) *dire
 			SourceIPv4: decision.config.ExternalIp4,
 			SourceIPv6: decision.config.ExternalIp6,
 		},
-		logger:    logger,
-		selfGuard: decision.selfGuard,
-		timeout:   directDialTimeout,
+		logger:  logger,
+		timeout: directDialTimeout,
 	}
 }
 
-func newTCPDialer(localAddr *net.TCPAddr, selfGuard *selfConnectionGuard) *net.Dialer {
-	dialer := &net.Dialer{
+func newTCPDialer(localAddr *net.TCPAddr) *net.Dialer {
+	return &net.Dialer{
 		Timeout:   directDialTimeout,
 		KeepAlive: 30 * time.Second,
 		LocalAddr: localAddr,
 	}
-	if selfGuard != nil {
-		dialer.ControlContext = func(_ context.Context, _ string, address string, _ syscall.RawConn) error {
-			if selfGuard.isSelfConnection(address) {
-				return fmt.Errorf("refusing to connect proxy to itself at %s", address)
-			}
-			return nil
-		}
-	}
-	return dialer
 }
 
 func resolveTCPSource(sourceIP string, wantIPv4 bool) (*net.TCPAddr, error) {
@@ -93,7 +80,7 @@ func (d *directDialer) DialContext(ctx context.Context, network, addr string) (n
 	extIp4 := d.dnsOptions.SourceIPv4
 	extIp6 := d.dnsOptions.SourceIPv6
 	if extIp4 == "" && extIp6 == "" && d.dnsOptions.Server == "" {
-		return newTCPDialer(nil, d.selfGuard).DialContext(dialCtx, network, addr)
+		return newTCPDialer(nil).DialContext(dialCtx, network, addr)
 	}
 	if network != "tcp" && network != "tcp4" && network != "tcp6" {
 		return nil, fmt.Errorf("direct TCP dial does not support network %q", network)
@@ -163,8 +150,8 @@ func (d *directDialer) DialContext(ctx context.Context, network, addr string) (n
 		}
 	}
 
-	v4Candidates := tcpDialCandidates{network: "tcp4", ips: ipv4, localAddr: local4, selfGuard: d.selfGuard}
-	v6Candidates := tcpDialCandidates{network: "tcp6", ips: ipv6, localAddr: local6, selfGuard: d.selfGuard}
+	v4Candidates := tcpDialCandidates{network: "tcp4", ips: ipv4, localAddr: local4}
+	v6Candidates := tcpDialCandidates{network: "tcp6", ips: ipv6, localAddr: local6}
 
 	if len(ipv6) == 0 {
 		return dialTCPSerial(dialCtx, port, v4Candidates)
@@ -183,7 +170,7 @@ func dialTCPSerial(ctx context.Context, port string, candidates tcpDialCandidate
 	for i, ip := range candidates.ips {
 		attemptCtx, cancel := withAttemptDeadline(ctx, len(candidates.ips)-i)
 		targetAddr := net.JoinHostPort(ip.String(), port)
-		conn, err := newTCPDialer(candidates.localAddr, candidates.selfGuard).DialContext(attemptCtx, candidates.network, targetAddr)
+		conn, err := newTCPDialer(candidates.localAddr).DialContext(attemptCtx, candidates.network, targetAddr)
 		cancel()
 		if err == nil {
 			return conn, nil

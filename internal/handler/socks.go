@@ -198,9 +198,6 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 
 	var parsedProxyURL *url.URL
 	if proxyURL == "" {
-		if currentDecision.selfGuard.isSelfConnection(targetHost) {
-			return fmt.Errorf("refusing to connect proxy to itself at %s", targetHost)
-		}
 		if extIp4 == "" && extIp6 == "" && extDns == "" {
 			return s.defaultHandler.UDPHandle(server, addr, d)
 		}
@@ -209,9 +206,6 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 		if err != nil || (parsedProxyURL.Scheme != "socks5" && parsedProxyURL.Scheme != "socks5h") {
 			s.logger.Warn("UDP Associate only supports SOCKS5 upstream. Falling back to direct for %s", target)
 			return s.defaultHandler.UDPHandle(server, addr, d)
-		}
-		if currentDecision.selfGuard.isSelfConnection(parsedProxyURL.Host) {
-			return fmt.Errorf("refusing to use the proxy's own listener as upstream: %s", parsedProxyURL.Host)
 		}
 	}
 
@@ -235,9 +229,6 @@ func (s *SocksHandler) UDPHandle(server *socks5.Server, addr *net.UDPAddr, d *so
 			targetIP, sourceIP := getTargetAndSourceIp(ips, extIp4, extIp6)
 			if targetIP == nil {
 				return nil, fmt.Errorf("no IP addresses for %s are compatible with the configured source IPs", target)
-			}
-			if currentDecision.selfGuard.isSelfConnection(net.JoinHostPort(targetIP.String(), port)) {
-				return nil, fmt.Errorf("refusing to connect proxy to itself at %s", targetHost)
 			}
 			if sourceIP != "" {
 				source, err := parseSourceIP(sourceIP, targetIP.To4() != nil)

@@ -5,7 +5,8 @@ rule-based routing. Destinations can be reached directly, blocked, or forwarded
 through an HTTP, HTTPS, SOCKS5, or SOCKS5h upstream proxy.
 
 It runs as a tray application on Windows and macOS and as a headless process on
-Linux.
+Linux. goProxy is intended for localhost and trusted private networks, not for
+operation as a public Internet-facing proxy.
 
 ## Features
 
@@ -17,7 +18,6 @@ Linux.
 - Optional source-interface binding and a custom DNS resolver
 - DNS, CIDR, glob, and routing caches
 - Rotating file logs with configurable levels
-- Protection against using goProxy's own listeners as upstream targets
 
 ## Install
 
@@ -62,9 +62,10 @@ Point an HTTP client at `http://127.0.0.1:8080` or a SOCKS5 client at
 
 > [!WARNING]
 > The default addresses listen on all network interfaces, and the incoming
-> proxies do not require authentication. Use loopback addresses such as
-> `127.0.0.1:8080` and `127.0.0.1:1080` unless you intentionally want to expose
-> the service to other hosts and have protected it at the network level.
+> proxies do not authenticate clients. Use the defaults only on a trusted
+> private network. For access from the same machine only, bind to loopback
+> addresses such as `127.0.0.1:8080` and `127.0.0.1:1080`. Never expose goProxy
+> directly to the public Internet.
 
 ## Configuration
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"strings"
 	"testing"
 	"time"
 
@@ -143,25 +142,28 @@ func TestDirectDialUsesExternalDNSWithoutSourceBinding(t *testing.T) {
 	conn.Close()
 }
 
-func TestDirectDialExternalDNSPreservesSelfConnectionGuard(t *testing.T) {
-	dnsAddr := startTestDNSServer(t, []dnsmessage.AResource{
-		{A: [4]byte{127, 0, 0, 1}},
-	})
+func TestDirectDialAllowsConfiguredListenerDestination(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen target: %v", err)
+	}
+	defer listener.Close()
+
 	cfg := &config.ProxyConfig{
 		DefaultProxy:   "direct",
 		Proxies:        map[string]string{"direct": ""},
-		ExternalDns:    dnsAddr,
-		ListenHttpAddr: "127.0.0.1:18080",
+		ListenHttpAddr: listener.Addr().String(),
 	}
 	handler := newDirectTestProxyHandler(t, cfg)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	ctx = context.WithValue(ctx, proxyURLContextKey, "")
 
-	_, err := handler.dialContext(ctx, "tcp", "self-via-external-dns.test:18080")
-	if err == nil || !strings.Contains(err.Error(), "refusing to connect proxy to itself") {
-		t.Fatalf("dial error = %v, want self-connection rejection", err)
+	conn, err := handler.dialContext(ctx, "tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dial configured listener destination: %v", err)
 	}
+	conn.Close()
 }
 
 func TestDirectDialTimeoutIncludesDNSResolution(t *testing.T) {

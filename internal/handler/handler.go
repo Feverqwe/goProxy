@@ -121,7 +121,7 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 		return newDirectRouteDialer(currentDecision, p.logger).DialContext(ctx, network, addr)
 	}
 
-	dialer := newTCPDialer(nil, currentDecision.selfGuard)
+	dialer := newTCPDialer(nil)
 
 	parsedURL, err := url.Parse(proxyURL)
 	if err != nil {

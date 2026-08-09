@@ -5,7 +5,9 @@
 goProxy is a cross-platform HTTP/HTTPS and SOCKS5 proxy written in Go. It
 selects a direct, blocked, or upstream-proxy route using ordered hostname and IP
 rules, loads external rule lists, binds outgoing connections to network
-interfaces, and can run from the system tray.
+interfaces, and can run from the system tray. It is intended for localhost or
+trusted private networks. Its incoming listeners are not authenticated or
+hardened for exposure as a public Internet proxy.
 
 Before making a non-trivial change, read:
 
@@ -23,7 +25,7 @@ Before making a non-trivial change, read:
 - `proxy_servers.go`: ownership and clean shutdown of HTTP and SOCKS5
   listeners.
 - `internal/handler/`: HTTP/CONNECT and SOCKS5 routing, direct/upstream dialing,
-  self-connection protection, and UDP sessions.
+  and UDP sessions.
 - `internal/config/`: profiles, YAML configuration, external rules, rule-list
   caching, host indexes, and documented YAML/JSON Schema generation.
 - `internal/cache/`: DNS, CIDR, and glob caches, including custom DNS and
@@ -74,8 +76,10 @@ unprivileged ports.
   Simple exact and domain-suffix matching uses a compact index and streaming
   parser; glob patterns remain a fallback path.
 - Preserve `context.Context` cancellation, deadlines, TCP half-close behavior,
-  and connection cleanup on every error path. Do not remove self-connection
-  protection from direct or upstream dialing.
+  and connection cleanup on every error path.
+- Preserve the trusted-network deployment model in user-facing documentation.
+  Do not describe goProxy as safe to expose directly to the public Internet;
+  changing that model requires explicit authentication and security design.
 - Configuration, caches, logging, and UDP sessions are accessed by multiple
   goroutines. Do not bypass the existing mutexes, `sync.Once`, `sync.Map`, or
   `singleflight`; define ownership and lifecycle explicitly for new shared

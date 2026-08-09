@@ -1,5 +1,13 @@
 # goProxy architecture
 
+## Trust model
+
+goProxy is designed to run on localhost or inside a trusted private network.
+Incoming HTTP and SOCKS5 listeners do not authenticate clients, and the
+application is not hardened for use as a public Internet-facing proxy. Binding
+to all interfaces is appropriate only when every network with access to those
+interfaces is trusted.
+
 ## Startup and reload flow
 
 `main.go` resolves the profile/configuration path, creates a shared
@@ -71,8 +79,6 @@ expired connections.
 
 Direct dialing honors `externalDns`, `externalIp4`, `externalIp6`, the shared
 timeout, and Happy Eyeballs behavior between IPv4 and IPv6.
-`selfConnectionGuard` prevents recursive connections to the application's own
-listeners and must remain active for any new dialing path.
 
 When changing TCP stream copying, preserve half-close behavior: completion of
 writes in one direction must not prematurely stop reads in the other.
