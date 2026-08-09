@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -14,8 +13,6 @@ import (
 	"goProxy/internal/handler"
 	"goProxy/internal/ticker"
 	"goProxy/internal/tray"
-
-	"github.com/txthinking/socks5"
 )
 
 var Version = "dev"
@@ -37,83 +34,115 @@ func main() {
 		return
 	}
 
+	if err := runProxy(*configPath); err != nil {
+		fmt.Fprintf(os.Stderr, "GoProxy: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runProxy(configPath string) error {
 	cacheManager := cache.NewCacheManager()
 
 	configMutex := &sync.Mutex{}
-	currentConfig, err := config.LoadConfig(*configPath, cacheManager, nil, true, nil, false)
+	currentConfig, err := config.LoadConfig(configPath, cacheManager, nil, true, nil, false)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	logger := currentConfig.GetLogger()
+	defer logger.Close()
 	proxyHandler := handler.NewProxyHandler(currentConfig, cacheManager, logger)
 
-	var currentHttpServer *http.Server
-	var currentSocksServer *socks5.Server
+	var currentHTTPServer *runningHTTPServer
+	var currentSOCKS5Server *runningSOCKS5Server
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGHUP, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 
 	trayManager := tray.NewTrayManager()
 
-	startServer := func(addr string) {
-		if currentHttpServer != nil {
+	startServer := func(addr string) error {
+		if addr == "" {
+			if currentHTTPServer != nil {
+				logger.Info("Stopping old HTTP server...")
+				if err := currentHTTPServer.Close(); err != nil {
+					logger.Error("Error closing old HTTP server: %v", err)
+				}
+				currentHTTPServer = nil
+			}
+			return nil
+		}
+
+		newServer, serveErr, err := startHTTPProxyServer(addr, proxyHandler)
+		if err != nil {
+			return err
+		}
+
+		if currentHTTPServer != nil {
 			logger.Info("Stopping old HTTP server...")
-			if err := currentHttpServer.Close(); err != nil {
-				logger.Error("Error closing old server: %v", err)
+			if err := currentHTTPServer.Close(); err != nil {
+				logger.Error("Error closing old HTTP server: %v", err)
 			}
 		}
 
-		if addr == "" {
-			return
-		}
-
-		newServer := &http.Server{
-			Addr:    addr,
-			Handler: proxyHandler,
-		}
-
+		logger.Info("Starting proxy server on %s", addr)
+		currentHTTPServer = newServer
 		go func() {
-			logger.Info("Starting proxy server on %s", addr)
-			if err := newServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := <-serveErr; err != nil {
 				logger.Error("Server error: %v", err)
 			}
 		}()
-
-		currentHttpServer = newServer
+		return nil
 	}
 
-	startSocksServer := func(addr string, ph *handler.ProxyHandler) {
-		if currentSocksServer != nil {
-			logger.Info("Stopping old SOCKS5 server...")
-			currentSocksServer.Shutdown()
-		}
-
+	startSocksServer := func(addr string, ph *handler.ProxyHandler) error {
 		if addr == "" {
-			return
+			if currentSOCKS5Server != nil {
+				logger.Info("Stopping old SOCKS5 server...")
+				if err := currentSOCKS5Server.Close(); err != nil {
+					logger.Error("Error closing old SOCKS5 server: %v", err)
+				}
+				currentSOCKS5Server = nil
+			}
+			return nil
 		}
 
 		sh := handler.NewSocksHandler(ph, currentConfig, cacheManager, logger)
-
-		socksServer, err := socks5.NewClassicServer(addr, "", "", "", 30, 30)
+		socksServer, serveErr, err := startSOCKS5ProxyServer(addr, sh)
 		if err != nil {
-			logger.Error("Failed to init SOCKS5 server: %v", err)
-			return
+			return err
 		}
 
+		if currentSOCKS5Server != nil {
+			logger.Info("Stopping old SOCKS5 server...")
+			if err := currentSOCKS5Server.Close(); err != nil {
+				logger.Error("Error closing old SOCKS5 server: %v", err)
+			}
+		}
+
+		logger.Info("Starting SOCKS5 server on %s", addr)
+		currentSOCKS5Server = socksServer
 		go func() {
-			logger.Info("Starting SOCKS5 server on %s", addr)
-			if err := socksServer.ListenAndServe(sh); err != nil {
+			if err := <-serveErr; err != nil {
 				logger.Debug("SOCKS5 server closed: %v", err)
 			}
 		}()
-
-		currentSocksServer = socksServer
+		return nil
 	}
 
 	tickerManager := ticker.NewTickerManager()
+	fatalErrChan := make(chan error, 1)
+	stopWithError := func(err error) {
+		logger.Error("Fatal server error: %v", err)
+		select {
+		case fatalErrChan <- err:
+		default:
+		}
+		trayManager.Exit()
+	}
 
-	reloadConfiguration := func(trigger string, forceReload bool) {
+	reloadConfiguration := func(trigger string, forceReload bool) error {
 		configMutex.Lock()
 		defer configMutex.Unlock()
 
@@ -122,7 +151,7 @@ func main() {
 		newConfig, err := currentConfig.ReloadConfig(proxyHandler.GetHTTPClient, forceReload)
 		if err != nil {
 			logger.Error("Error reloading configuration: %v", err)
-			return
+			return nil
 		}
 
 		prevAutoReloadHours := currentConfig.AutoReloadHours
@@ -136,14 +165,29 @@ func main() {
 		}
 
 		if newConfig.ListenHttpAddr != prevListenHttpAddr {
-			startServer(newConfig.ListenHttpAddr)
+			if err := startServer(newConfig.ListenHttpAddr); err != nil {
+				return fmt.Errorf("reload HTTP listener: %w", err)
+			}
 		}
 
 		if newConfig.ListenSocksAddr != prevListenSocksAddr {
-			startSocksServer(newConfig.ListenSocksAddr, proxyHandler)
+			if err := startSocksServer(newConfig.ListenSocksAddr, proxyHandler); err != nil {
+				return fmt.Errorf("reload SOCKS5 listener: %w", err)
+			}
 		}
 
 		proxyHandler.UpdateConfig(currentConfig, cacheManager)
+		return nil
+	}
+
+	if err := startServer(currentConfig.ListenHttpAddr); err != nil {
+		return err
+	}
+	if err := startSocksServer(currentConfig.ListenSocksAddr, proxyHandler); err != nil {
+		if currentHTTPServer != nil {
+			_ = currentHTTPServer.Close()
+		}
+		return err
 	}
 
 	go func() {
@@ -152,45 +196,58 @@ func main() {
 			case sig := <-sigChan:
 				switch sig {
 				case syscall.SIGHUP:
-					reloadConfiguration("Received SIGHUP signal", false)
+					if err := reloadConfiguration("Received SIGHUP signal", false); err != nil {
+						stopWithError(err)
+						return
+					}
 				case os.Interrupt, syscall.SIGTERM:
 					logger.Info("Received interrupt signal, shutting down...")
 					trayManager.Exit()
 					return
 				}
 			case <-trayManager.GetReloadChan():
-				reloadConfiguration("Manual reload from tray", false)
+				if err := reloadConfiguration("Manual reload from tray", false); err != nil {
+					stopWithError(err)
+					return
+				}
 			case <-trayManager.GetReloadRulesChan():
-				reloadConfiguration("Force reload rules from tray", true)
+				if err := reloadConfiguration("Force reload rules from tray", true); err != nil {
+					stopWithError(err)
+					return
+				}
 			case <-trayManager.GetOpenConfigChan():
-				config.OpenConfigDirectory(*configPath, logger)
+				config.OpenConfigDirectory(configPath, logger)
 			case <-trayManager.GetCheckUpdateChan():
 				tray.CheckForUpdates(Version, LatestReleaseAPI, ReleasesURL, logger)
 			case <-tickerManager.GetReloadChan():
-				reloadConfiguration("Periodic update", false)
+				if err := reloadConfiguration("Periodic update", false); err != nil {
+					stopWithError(err)
+					return
+				}
 			}
 		}
 	}()
 
-	startServer(currentConfig.ListenHttpAddr)
-	startSocksServer(currentConfig.ListenSocksAddr, proxyHandler)
-
 	tickerManager.StartTicker(currentConfig.AutoReloadHours)
 
-	go func() {
-		<-trayManager.GetQuitChan()
-
-		tickerManager.StopOldTicker()
-
-		logger.Info("Shutting down...")
-		if currentHttpServer != nil {
-			currentHttpServer.Close()
-		}
-		if currentSocksServer != nil {
-			currentSocksServer.Shutdown()
-		}
-		logger.Info("Proxy server stopped")
-	}()
-
 	trayManager.Start()
+
+	tickerManager.StopOldTicker()
+	configMutex.Lock()
+	logger.Info("Shutting down...")
+	if currentHTTPServer != nil {
+		_ = currentHTTPServer.Close()
+	}
+	if currentSOCKS5Server != nil {
+		_ = currentSOCKS5Server.Close()
+	}
+	logger.Info("Proxy server stopped")
+	configMutex.Unlock()
+
+	select {
+	case err := <-fatalErrChan:
+		return err
+	default:
+		return nil
+	}
 }

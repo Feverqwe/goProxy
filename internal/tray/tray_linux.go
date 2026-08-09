@@ -5,6 +5,7 @@ package tray
 import (
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 )
 
@@ -14,6 +15,7 @@ type TrayManager struct {
 	openConfigChan  chan struct{}
 	checkUpdateChan chan struct{}
 	reloadRulesChan chan struct{}
+	exitOnce        sync.Once
 }
 
 func NewTrayManager() *TrayManager {
@@ -29,7 +31,7 @@ func NewTrayManager() *TrayManager {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 		<-sigChan
-		close(tm.quitChan)
+		tm.Exit()
 	}()
 
 	return tm
@@ -60,5 +62,7 @@ func (tm *TrayManager) GetReloadRulesChan() <-chan struct{} {
 }
 
 func (tm *TrayManager) Exit() {
-
+	tm.exitOnce.Do(func() {
+		close(tm.quitChan)
+	})
 }
