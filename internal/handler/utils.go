@@ -18,6 +18,22 @@ func socks5ProxyAddress(proxyURL *url.URL) (string, error) {
 	return net.JoinHostPort(host, port), nil
 }
 
+func httpProxyAddress(proxyURL *url.URL) (string, error) {
+	host := proxyURL.Hostname()
+	if host == "" {
+		return "", fmt.Errorf("HTTP proxy URL has no host")
+	}
+	port := proxyURL.Port()
+	if port == "" {
+		if proxyURL.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	return net.JoinHostPort(host, port), nil
+}
+
 func getTargetAndSourceIp(ips []net.IP, extIp4, extIp6 string) (net.IP, string) {
 	for _, ip := range ips {
 		if ip == nil {

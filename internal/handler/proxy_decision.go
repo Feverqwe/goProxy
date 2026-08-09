@@ -56,6 +56,7 @@ func (d *ProxyDecision) matchesGlob(pattern, s string) bool {
 }
 
 func (d *ProxyDecision) GetProxyForHost(host string) (proxyURL string, decision ProxyDecisionResult, err error) {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
 	decision = d.getProxyDecision(host)
 	var exists bool
 	proxyURL, exists = d.config.Proxies[decision.Proxy]

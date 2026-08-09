@@ -67,6 +67,22 @@ func TestHostRuleBuilderIndexesSimpleRules(t *testing.T) {
 	}
 }
 
+func TestHostRuleBuilderNormalizesDNSCaseAndTrailingDot(t *testing.T) {
+	var builder hostRuleBuilder
+	builder.addString("*.Example.COM.", false)
+	builder.addString("!Allowed.Example.COM.", false)
+
+	for _, host := range []string{"example.com", "www.example.com"} {
+		positive, negative := builder.index.match(host)
+		if !positive || negative {
+			t.Errorf("match(%q) = (%v, %v), want (true, false)", host, positive, negative)
+		}
+	}
+	if positive, negative := builder.index.match("allowed.example.com"); !positive || !negative {
+		t.Fatalf("match(allowed.example.com) = (%v, %v), want (true, true)", positive, negative)
+	}
+}
+
 func TestScanRuleTokensStreamsLongListsAndComments(t *testing.T) {
 	input := "  # comment\n// another comment\n*.one.example,*.two.example\nhttps://rules.example/list\n" +
 		strings.Repeat("x", 70*1024) + "\n"

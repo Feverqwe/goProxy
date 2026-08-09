@@ -45,6 +45,7 @@ func (b *hostRuleBuilder) addString(token string, forceNegation bool) {
 }
 
 func (b *hostRuleBuilder) add(token []byte, forceNegation bool) {
+	token = normalizeHostRuleToken(token)
 	if len(token) == 0 {
 		return
 	}
@@ -82,6 +83,20 @@ func (b *hostRuleBuilder) add(token []byte, forceNegation bool) {
 		}
 		b.addFallback(expanded, forceNegation)
 	}
+}
+
+// DNS names and their ASCII glob patterns are case-insensitive. Normalize the
+// token in place to avoid an allocation for every entry in large rule lists.
+func normalizeHostRuleToken(token []byte) []byte {
+	for i, value := range token {
+		if value >= 'A' && value <= 'Z' {
+			token[i] = value + ('a' - 'A')
+		}
+	}
+	if len(token) > 1 && token[len(token)-1] == '.' {
+		token = token[:len(token)-1]
+	}
+	return token
 }
 
 func classifyHostToken(token []byte, forceNegation bool) (hostTokenKind, []byte) {

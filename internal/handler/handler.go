@@ -3,6 +3,7 @@ package handler
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -55,10 +56,11 @@ type socks5DialerWithConn interface {
 }
 
 type ProxyHandler struct {
-	decision    *ProxyDecision
-	proxyServer *goproxy.ProxyHttpServer
-	logger      *logging.Logger
-	mu          sync.RWMutex
+	decision               *ProxyDecision
+	proxyServer            *goproxy.ProxyHttpServer
+	logger                 *logging.Logger
+	upstreamProxyTLSConfig *tls.Config
+	mu                     sync.RWMutex
 }
 
 func NewProxyHandler(config *config.ProxyConfig, cacheManager *cache.CacheManager, logger *logging.Logger) *ProxyHandler {
@@ -159,7 +161,11 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 		closeConn = false
 		return conn, nil
 	case "http", "https":
-		conn, err := dialer.DialContext(ctx, "tcp", parsedURL.Host)
+		proxyAddr, err := httpProxyAddress(parsedURL)
+		if err != nil {
+			return nil, err
+		}
+		conn, err := dialer.DialContext(ctx, "tcp", proxyAddr)
 		if err != nil {
 			return nil, fmt.Errorf("error connecting to HTTP proxy: %w", err)
 		}
@@ -171,7 +177,22 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 			}
 		}()
 
-		conn.SetDeadline(time.Now().Add(10 * time.Second))
+		if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+			return nil, fmt.Errorf("error setting HTTP proxy deadline: %w", err)
+		}
+
+		if parsedURL.Scheme == "https" {
+			tlsConfig := &tls.Config{ServerName: parsedURL.Hostname()}
+			if p.upstreamProxyTLSConfig != nil {
+				tlsConfig = p.upstreamProxyTLSConfig.Clone()
+				tlsConfig.ServerName = parsedURL.Hostname()
+			}
+			tlsConn := tls.Client(conn, tlsConfig)
+			conn = tlsConn
+			if err := tlsConn.HandshakeContext(ctx); err != nil {
+				return nil, fmt.Errorf("error establishing TLS with HTTPS proxy: %w", err)
+			}
+		}
 
 		connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", addr, addr)
 
@@ -199,7 +220,9 @@ func (p *ProxyHandler) dialContext(ctx context.Context, network, addr string) (n
 			return nil, fmt.Errorf("proxy CONNECT failed with status: %d %s", resp.StatusCode, resp.Status)
 		}
 
-		conn.SetDeadline(time.Time{})
+		if err := conn.SetDeadline(time.Time{}); err != nil {
+			return nil, fmt.Errorf("error clearing HTTP proxy deadline: %w", err)
+		}
 
 		closeConn = false
 		return &bufferedConn{
