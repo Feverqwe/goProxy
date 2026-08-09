@@ -14,6 +14,7 @@ type TrayManager struct {
 	openConfigChan  chan struct{}
 	checkUpdateChan chan struct{}
 	reloadRulesChan chan struct{}
+	reportChan      chan ReportPeriod
 }
 
 func NewTrayManager() *TrayManager {
@@ -23,6 +24,7 @@ func NewTrayManager() *TrayManager {
 		openConfigChan:  make(chan struct{}, 1),
 		checkUpdateChan: make(chan struct{}, 1),
 		reloadRulesChan: make(chan struct{}, 1),
+		reportChan:      make(chan ReportPeriod, 1),
 	}
 }
 
@@ -50,6 +52,10 @@ func (tm *TrayManager) GetReloadRulesChan() <-chan struct{} {
 	return tm.reloadRulesChan
 }
 
+func (tm *TrayManager) GetReportChan() <-chan ReportPeriod {
+	return tm.reportChan
+}
+
 func (tm *TrayManager) onReady() {
 	systray.SetTemplateIcon(assets.IconSVGData, assets.IconIcoData)
 	systray.SetTooltip("GoProxy - HTTP Proxy Server")
@@ -70,6 +76,10 @@ func (tm *TrayManager) createMenu() {
 	reloadItem := systray.AddMenuItem("Reload config", "Reload configuration file")
 	reloadRulesItem := systray.AddMenuItem("Reload rules", "Force reload external rules")
 	openConfigItem := systray.AddMenuItem("Open config directory", "Open directory containing config file")
+	reportItem := systray.AddMenuItem("Report", "Create and open a usage report")
+	reportDayItem := reportItem.AddSubMenuItem("Last 24 hours", "Create a report for the last 24 hours")
+	reportWeekItem := reportItem.AddSubMenuItem("Last 7 days", "Create a report for the last 7 days")
+	reportAllItem := reportItem.AddSubMenuItem("All time", "Create a report from all available logs")
 	checkUpdateItem := systray.AddMenuItem("Check updates", "Check for new version")
 	systray.AddSeparator()
 
@@ -112,6 +122,20 @@ func (tm *TrayManager) createMenu() {
 			}
 		}
 	}()
+
+	forwardReport := func(item *systray.MenuItem, period ReportPeriod) {
+		go func() {
+			for range item.ClickedCh {
+				select {
+				case tm.reportChan <- period:
+				default:
+				}
+			}
+		}()
+	}
+	forwardReport(reportDayItem, ReportLastDay)
+	forwardReport(reportWeekItem, ReportLastSevenDays)
+	forwardReport(reportAllItem, ReportAllTime)
 
 	go func() {
 		for range quitItem.ClickedCh {

@@ -19,13 +19,14 @@ func defaultConfig() *ProxyConfig {
 			"direct": "",
 			"block":  "#",
 		},
-		ListenHttpAddr:  ":8080",
-		ListenSocksAddr: ":1080",
-		LogLevel:        "info",
-		LogFile:         "goProxy.log",
-		MaxLogSize:      10,
-		MaxLogFiles:     5,
-		Rules:           []RuleConfig{},
+		ListenHttpAddr:   ":8080",
+		ListenSocksAddr:  ":1080",
+		LogLevel:         "info",
+		LogFile:          "goProxy.log",
+		MaxLogSize:       10,
+		MaxLogFiles:      5,
+		ReportTopDomains: 20,
+		Rules:            []RuleConfig{},
 	}
 }
 

@@ -15,6 +15,7 @@ type TrayManager struct {
 	openConfigChan  chan struct{}
 	checkUpdateChan chan struct{}
 	reloadRulesChan chan struct{}
+	reportChan      chan ReportPeriod
 	exitOnce        sync.Once
 }
 
@@ -25,6 +26,7 @@ func NewTrayManager() *TrayManager {
 		openConfigChan:  make(chan struct{}),
 		checkUpdateChan: make(chan struct{}),
 		reloadRulesChan: make(chan struct{}),
+		reportChan:      make(chan ReportPeriod),
 	}
 
 	go func() {
@@ -59,6 +61,10 @@ func (tm *TrayManager) GetCheckUpdateChan() <-chan struct{} {
 
 func (tm *TrayManager) GetReloadRulesChan() <-chan struct{} {
 	return tm.reloadRulesChan
+}
+
+func (tm *TrayManager) GetReportChan() <-chan ReportPeriod {
+	return tm.reportChan
 }
 
 func (tm *TrayManager) Exit() {

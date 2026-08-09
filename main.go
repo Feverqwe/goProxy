@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"goProxy/internal/cache"
 	"goProxy/internal/config"
@@ -23,6 +24,14 @@ const (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "report" {
+		if err := runReportCommand(os.Args[2:], os.Stdout, os.Stderr, time.Now()); err != nil {
+			fmt.Fprintf(os.Stderr, "GoProxy report: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	defaultConfigPath := config.GetConfigPath()
 	configPath := flag.String("config", defaultConfigPath, "Path to configuration file")
 	versionFlag := flag.Bool("version", false, "Display version information")
@@ -61,6 +70,8 @@ func runProxy(configPath string) error {
 	defer signal.Stop(sigChan)
 
 	trayManager := tray.NewTrayManager()
+	var reportMutex sync.Mutex
+	var reportWG sync.WaitGroup
 
 	startServer := func(addr string) error {
 		if addr == "" {
@@ -190,9 +201,13 @@ func runProxy(configPath string) error {
 		return err
 	}
 
+	eventLoopDone := make(chan struct{})
 	go func() {
+		defer close(eventLoopDone)
 		for {
 			select {
+			case <-trayManager.GetQuitChan():
+				return
 			case sig := <-sigChan:
 				switch sig {
 				case syscall.SIGHUP:
@@ -219,6 +234,15 @@ func runProxy(configPath string) error {
 				config.OpenConfigDirectory(configPath, logger)
 			case <-trayManager.GetCheckUpdateChan():
 				tray.CheckForUpdates(Version, LatestReleaseAPI, ReleasesURL, logger)
+			case period := <-trayManager.GetReportChan():
+				reportConfig := currentConfig
+				reportWG.Add(1)
+				go func() {
+					defer reportWG.Done()
+					reportMutex.Lock()
+					defer reportMutex.Unlock()
+					generateAndOpenTrayReport(reportConfig, period, time.Now(), logger)
+				}()
 			case <-tickerManager.GetReloadChan():
 				if err := reloadConfiguration("Periodic update", false); err != nil {
 					stopWithError(err)
@@ -231,6 +255,7 @@ func runProxy(configPath string) error {
 	tickerManager.StartTicker(currentConfig.AutoReloadHours)
 
 	trayManager.Start()
+	<-eventLoopDone
 
 	tickerManager.StopOldTicker()
 	configMutex.Lock()
@@ -241,8 +266,9 @@ func runProxy(configPath string) error {
 	if currentSOCKS5Server != nil {
 		_ = currentSOCKS5Server.Close()
 	}
-	logger.Info("Proxy server stopped")
 	configMutex.Unlock()
+	reportWG.Wait()
+	logger.Info("Proxy server stopped")
 
 	select {
 	case err := <-fatalErrChan:

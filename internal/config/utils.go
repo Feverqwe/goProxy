@@ -71,6 +71,10 @@ func (c *ProxyConfig) GetAccessLogPath() string {
 	return filepath.Join(profileDir, c.LogFile)
 }
 
+func GetReportDirectory() string {
+	return filepath.Join(getProfilePath(), "report")
+}
+
 func (c *ProxyConfig) GetMaxLogSize() int {
 	if c.MaxLogSize <= 0 {
 		return 10
@@ -83,6 +87,13 @@ func (c *ProxyConfig) GetMaxLogFiles() int {
 		return 5
 	}
 	return c.MaxLogFiles
+}
+
+func (c *ProxyConfig) GetReportTopDomains() int {
+	if c.ReportTopDomains <= 0 {
+		return 20
+	}
+	return c.ReportTopDomains
 }
 
 func loadExternalRules(source string, baseDir string, cacheOnly bool, httpClientFunc HTTPClientFunc, logger *logging.Logger, forceReload bool, ttl int) (string, error) {
