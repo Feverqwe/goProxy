@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -114,4 +115,55 @@ func BenchmarkBuildTwoMillionWildcardHostIndex(b *testing.B) {
 			b.Fatalf("indexed %d domains", builder.index.positiveSuffix.count)
 		}
 	}
+}
+
+func BenchmarkBuildHostIndexFromFile(b *testing.B) {
+	path := os.Getenv("GOPROXY_RULE_BENCH_FILE")
+	if path == "" {
+		b.Skip("set GOPROXY_RULE_BENCH_FILE to a host rule list")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ReportAllocs()
+	b.SetBytes(info.Size())
+	var indexedRules uint32
+	var indexBytes int
+	b.ResetTimer()
+	for range b.N {
+		file, err := os.Open(path)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		var capacity hostRuleCapacity
+		if err := scanRuleTokens(file, func(token []byte) {
+			capacity.observe(token, false)
+		}); err != nil {
+			file.Close()
+			b.Fatal(err)
+		}
+		var builder hostRuleBuilder
+		builder.reserve(capacity)
+		if _, err := file.Seek(0, 0); err != nil {
+			file.Close()
+			b.Fatal(err)
+		}
+		if err := scanRuleTokens(file, func(token []byte) {
+			builder.add(token, false)
+		}); err != nil {
+			file.Close()
+			b.Fatal(err)
+		}
+		if err := file.Close(); err != nil {
+			b.Fatal(err)
+		}
+
+		indexedRules = builder.index.positiveSuffix.count
+		indexBytes = len(builder.index.positiveSuffix.data) + len(builder.index.positiveSuffix.table)*4
+	}
+	b.ReportMetric(float64(indexedRules), "rules")
+	b.ReportMetric(float64(indexBytes), "index-B")
 }

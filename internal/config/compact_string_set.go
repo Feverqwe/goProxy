@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/binary"
+	"hash/maphash"
 	"math"
 )
 
@@ -12,6 +13,7 @@ type compactStringSet struct {
 	data  []byte
 	table []uint32
 	count uint32
+	seed  maphash.Seed
 }
 
 func (s *compactStringSet) reserve(additionalCount, additionalBytes int) {
@@ -36,6 +38,9 @@ func (s *compactStringSet) reserve(additionalCount, additionalBytes int) {
 	}
 
 	oldTable := s.table
+	if len(oldTable) == 0 {
+		s.seed = maphash.MakeSeed()
+	}
 	s.table = make([]uint32, tableSize)
 	for _, offset := range oldTable {
 		if offset != 0 {
@@ -50,12 +55,13 @@ func (s *compactStringSet) add(value []byte) bool {
 	}
 
 	if len(s.table) == 0 {
+		s.seed = maphash.MakeSeed()
 		s.table = make([]uint32, 16)
 	} else if (uint64(s.count)+1)*4 > uint64(len(s.table))*3 {
 		s.grow()
 	}
 
-	hash := hashBytes(value)
+	hash := maphash.Bytes(s.seed, value)
 	index := int(hash & uint64(len(s.table)-1))
 	for {
 		offset := s.table[index]
@@ -79,7 +85,7 @@ func (s *compactStringSet) has(value string) bool {
 		return false
 	}
 
-	hash := hashString(value)
+	hash := maphash.String(s.seed, value)
 	index := int(hash & uint64(len(s.table)-1))
 	for {
 		offset := s.table[index]
@@ -106,7 +112,7 @@ func (s *compactStringSet) grow() {
 
 func (s *compactStringSet) insertOffset(offset uint32) {
 	value := s.bytesAt(offset - 1)
-	index := int(hashBytes(value) & uint64(len(s.table)-1))
+	index := int(maphash.Bytes(s.seed, value) & uint64(len(s.table)-1))
 	for s.table[index] != 0 {
 		index = (index + 1) & (len(s.table) - 1)
 	}
@@ -143,30 +149,4 @@ func (s *compactStringSet) equalStringAt(offset uint32, value string) bool {
 		}
 	}
 	return true
-}
-
-func hashBytes(value []byte) uint64 {
-	const (
-		offset64 = uint64(14695981039346656037)
-		prime64  = uint64(1099511628211)
-	)
-	hash := offset64
-	for _, b := range value {
-		hash ^= uint64(b)
-		hash *= prime64
-	}
-	return hash
-}
-
-func hashString(value string) uint64 {
-	const (
-		offset64 = uint64(14695981039346656037)
-		prime64  = uint64(1099511628211)
-	)
-	hash := offset64
-	for i := range len(value) {
-		hash ^= uint64(value[i])
-		hash *= prime64
-	}
-	return hash
 }
