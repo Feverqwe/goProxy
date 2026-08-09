@@ -94,6 +94,12 @@ GoProxy automatically creates a configuration file on first run:
 | 🍎 macOS | `~/Library/Application Support/com.rndnm.goproxy/config.yaml` |
 | 🐧 Linux | Same directory as the executable |
 
+On first run GoProxy also creates `goproxy.schema.json` next to the configuration
+file. The generated YAML references this schema, so editors with YAML Language
+Server support provide field descriptions, autocompletion, and validation. The
+configuration itself contains comments for optional settings, while the schema
+also provides constraints and examples.
+
 ### Example Configuration
 
 ```yaml

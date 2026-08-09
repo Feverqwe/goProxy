@@ -10,6 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const configSchemaFilename = "goproxy.schema.json"
+
 func defaultConfig() *ProxyConfig {
 	return &ProxyConfig{
 		DefaultProxy: "direct",
@@ -76,16 +78,23 @@ func (c *ProxyConfig) afterLoad(httpClientFunc HTTPClientFunc, cacheOnly bool, f
 }
 
 func saveDefaultConfig(configPath string, config *ProxyConfig) error {
-	file, err := os.Create(configPath)
+	configYAML, err := generateDocumentedYAML(config)
 	if err != nil {
-		return fmt.Errorf("error creating config file: %v", err)
+		return fmt.Errorf("error generating default config: %v", err)
 	}
-	defer file.Close()
 
-	encoder := yaml.NewEncoder(file)
-	encoder.SetIndent(2)
-	if err := encoder.Encode(config); err != nil {
-		return fmt.Errorf("error encoding config to YAML: %v", err)
+	configSchemaJSON, err := generateConfigSchema(config)
+	if err != nil {
+		return fmt.Errorf("error generating config schema: %v", err)
+	}
+
+	schemaPath := filepath.Join(filepath.Dir(configPath), configSchemaFilename)
+	if err := os.WriteFile(schemaPath, configSchemaJSON, 0600); err != nil {
+		return fmt.Errorf("error creating config schema: %v", err)
+	}
+
+	if err := os.WriteFile(configPath, configYAML, 0600); err != nil {
+		return fmt.Errorf("error creating config file: %v", err)
 	}
 
 	return nil
