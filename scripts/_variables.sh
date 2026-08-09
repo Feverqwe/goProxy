@@ -6,4 +6,4 @@ APP_ID="com.rndnm.goproxy"
 BINARY="goProxy"
 ICON_PATH="./assets/icon.icns"
 
-VERSION=1.11.1
+VERSION=1.12.0
