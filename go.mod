@@ -3,7 +3,7 @@ module goProxy
 go 1.25.0
 
 require (
-	github.com/elazarl/goproxy v1.8.5
+	github.com/elazarl/goproxy v1.9.0
 	github.com/getlantern/systray v1.2.2
 	github.com/gobwas/glob v0.2.3
 	github.com/hashicorp/go-version v1.9.0
@@ -35,9 +35,9 @@ require (
 	github.com/oxtoacart/bpool v0.0.0-20190530202638-03653db5a59c // indirect
 	github.com/txthinking/socks5 v0.0.0-20260601051520-339b044ab0eb
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/otel v1.44.0 // indirect
-	go.opentelemetry.io/otel/metric v1.44.0 // indirect
-	go.opentelemetry.io/otel/trace v1.44.0 // indirect
+	go.opentelemetry.io/otel v1.45.0 // indirect
+	go.opentelemetry.io/otel/metric v1.45.0 // indirect
+	go.opentelemetry.io/otel/trace v1.45.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
 	golang.org/x/sync v0.22.0
